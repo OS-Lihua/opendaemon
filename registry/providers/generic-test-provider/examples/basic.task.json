@@ -1,0 +1,4 @@
+{
+  "provider": "generic-test-provider",
+  "prompt": "Return a fixed test response."
+}

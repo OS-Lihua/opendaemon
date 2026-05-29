@@ -1,0 +1,383 @@
+{
+  "$defs": {
+    "CancelSignal": {
+      "enum": [
+        "SIGTERM",
+        "SIGINT",
+        "kill",
+        "none"
+      ],
+      "type": "string"
+    },
+    "DetectConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version_args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version_regex": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "commands",
+        "version_args"
+      ],
+      "type": "object"
+    },
+    "DirectoryLockMode": {
+      "enum": [
+        "exclusive",
+        "shared",
+        "none"
+      ],
+      "type": "string"
+    },
+    "EnvironmentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "optional": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "optional"
+      ],
+      "type": "object"
+    },
+    "ExecutionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cancel_signal": {
+          "$ref": "#/$defs/CancelSignal"
+        },
+        "command": {
+          "type": "string"
+        },
+        "input_mode": {
+          "$ref": "#/$defs/ExecutionInputMode"
+        },
+        "supports_streaming": {
+          "type": "boolean"
+        },
+        "working_directory": {
+          "$ref": "#/$defs/WorkingDirectoryMode"
+        }
+      },
+      "required": [
+        "command",
+        "args",
+        "input_mode",
+        "working_directory",
+        "supports_streaming",
+        "cancel_signal"
+      ],
+      "type": "object"
+    },
+    "ExecutionInputMode": {
+      "enum": [
+        "arg",
+        "stdin",
+        "temp_file"
+      ],
+      "type": "string"
+    },
+    "InstallInstructions": {
+      "additionalProperties": false,
+      "properties": {
+        "linux": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "macos": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "windows": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "macos",
+        "linux",
+        "windows"
+      ],
+      "type": "object"
+    },
+    "IntegrationType": {
+      "enum": [
+        "cli",
+        "acp",
+        "http",
+        "native"
+      ],
+      "type": "string"
+    },
+    "ModelConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "supported": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "default",
+        "supported"
+      ],
+      "type": "object"
+    },
+    "ProviderCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "browser": {
+          "type": "boolean"
+        },
+        "direct_directory": {
+          "type": "boolean"
+        },
+        "filesystem_read": {
+          "type": "boolean"
+        },
+        "filesystem_write": {
+          "type": "boolean"
+        },
+        "git": {
+          "type": "boolean"
+        },
+        "mcp": {
+          "type": "boolean"
+        },
+        "remote_execution": {
+          "type": "boolean"
+        },
+        "shell": {
+          "type": "boolean"
+        },
+        "worktree": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "filesystem_read",
+        "filesystem_write",
+        "shell",
+        "git",
+        "browser",
+        "mcp",
+        "remote_execution",
+        "worktree",
+        "direct_directory"
+      ],
+      "type": "object"
+    },
+    "ProviderPermissions": {
+      "additionalProperties": false,
+      "properties": {
+        "provider_permission_modes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recommended_directory_lock": {
+          "$ref": "#/$defs/DirectoryLockMode"
+        },
+        "requires_directory_grant": {
+          "type": "boolean"
+        },
+        "supports_permission_events": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "requires_directory_grant",
+        "recommended_directory_lock",
+        "provider_permission_modes",
+        "supports_permission_events"
+      ],
+      "type": "object"
+    },
+    "ProviderStatus": {
+      "enum": [
+        "community",
+        "verified",
+        "first_party",
+        "deprecated"
+      ],
+      "type": "string"
+    },
+    "SecurityConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "data_policy_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "review_level": {
+          "$ref": "#/$defs/SecurityReviewLevel"
+        },
+        "runs_locally": {
+          "type": "boolean"
+        },
+        "sends_code_to_vendor": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "runs_locally",
+        "sends_code_to_vendor",
+        "review_level"
+      ],
+      "type": "object"
+    },
+    "SecurityReviewLevel": {
+      "enum": [
+        "standard",
+        "strict",
+        "experimental"
+      ],
+      "type": "string"
+    },
+    "VendorInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "homepage": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "support_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "homepage"
+      ],
+      "type": "object"
+    },
+    "WorkingDirectoryMode": {
+      "enum": [
+        "required",
+        "optional",
+        "unsupported"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "capabilities": {
+      "$ref": "#/$defs/ProviderCapabilities"
+    },
+    "description": {
+      "type": "string"
+    },
+    "detect": {
+      "$ref": "#/$defs/DetectConfig"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "environment": {
+      "$ref": "#/$defs/EnvironmentConfig"
+    },
+    "execution": {
+      "$ref": "#/$defs/ExecutionConfig"
+    },
+    "id": {
+      "type": "string"
+    },
+    "install": {
+      "$ref": "#/$defs/InstallInstructions"
+    },
+    "integration_type": {
+      "$ref": "#/$defs/IntegrationType"
+    },
+    "models": {
+      "$ref": "#/$defs/ModelConfig"
+    },
+    "permissions": {
+      "$ref": "#/$defs/ProviderPermissions"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "security": {
+      "$ref": "#/$defs/SecurityConfig"
+    },
+    "status": {
+      "$ref": "#/$defs/ProviderStatus"
+    },
+    "vendor": {
+      "$ref": "#/$defs/VendorInfo"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "display_name",
+    "status",
+    "vendor",
+    "integration_type",
+    "description",
+    "install",
+    "detect",
+    "execution",
+    "models",
+    "capabilities",
+    "permissions",
+    "environment",
+    "security"
+  ],
+  "title": "ProviderManifest",
+  "type": "object"
+}

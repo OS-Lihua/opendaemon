@@ -1,0 +1,81 @@
+{
+  "schema_version": "1",
+  "id": "claude",
+  "display_name": "Claude",
+  "status": "community",
+  "vendor": {
+    "name": "Anthropic",
+    "homepage": "https://www.anthropic.com",
+    "support_url": "https://support.anthropic.com"
+  },
+  "integration_type": "cli",
+  "description": "Claude CLI provider manifest for local OpenDaemon registry metadata.",
+  "install": {
+    "macos": [
+      "Install the Claude CLI from Anthropic's current documentation."
+    ],
+    "linux": [
+      "Install the Claude CLI from Anthropic's current documentation."
+    ],
+    "windows": [
+      "Install the Claude CLI from Anthropic's current documentation."
+    ]
+  },
+  "detect": {
+    "commands": [
+      "claude"
+    ],
+    "version_args": [
+      "--version"
+    ],
+    "version_regex": null
+  },
+  "execution": {
+    "command": "claude",
+    "args": [],
+    "input_mode": "stdin",
+    "working_directory": "optional",
+    "supports_streaming": true,
+    "cancel_signal": "SIGTERM"
+  },
+  "models": {
+    "default": "claude-sonnet-4.5",
+    "supported": [
+      "claude-sonnet-4.5",
+      "claude-opus-4.1"
+    ]
+  },
+  "capabilities": {
+    "filesystem_read": true,
+    "filesystem_write": true,
+    "shell": true,
+    "git": true,
+    "browser": false,
+    "mcp": true,
+    "remote_execution": true,
+    "worktree": true,
+    "direct_directory": true
+  },
+  "permissions": {
+    "requires_directory_grant": true,
+    "recommended_directory_lock": "exclusive",
+    "provider_permission_modes": [
+      "default",
+      "accept_edits",
+      "plan"
+    ],
+    "supports_permission_events": false
+  },
+  "environment": {
+    "required": [],
+    "optional": [
+      "ANTHROPIC_API_KEY"
+    ]
+  },
+  "security": {
+    "runs_locally": true,
+    "sends_code_to_vendor": true,
+    "data_policy_url": "https://www.anthropic.com/legal/privacy",
+    "review_level": "standard"
+  }
+}

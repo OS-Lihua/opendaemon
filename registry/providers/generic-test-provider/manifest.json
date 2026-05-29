@@ -1,0 +1,78 @@
+{
+  "schema_version": "1",
+  "id": "generic-test-provider",
+  "display_name": "Generic Test Provider",
+  "status": "community",
+  "vendor": {
+    "name": "OpenDaemon Test Fixtures",
+    "homepage": "https://example.invalid/opendaemon-test-provider",
+    "support_url": null
+  },
+  "integration_type": "cli",
+  "description": "Stable provider fixture for registry validation and API tests.",
+  "install": {
+    "macos": [
+      "Use the test-provider executable from a test fixture path."
+    ],
+    "linux": [
+      "Use the test-provider executable from a test fixture path."
+    ],
+    "windows": [
+      "Use the test-provider executable from a test fixture path."
+    ]
+  },
+  "detect": {
+    "commands": [
+      "test-provider"
+    ],
+    "version_args": [
+      "--version"
+    ],
+    "version_regex": null
+  },
+  "execution": {
+    "command": "test-provider",
+    "args": [
+      "run"
+    ],
+    "input_mode": "stdin",
+    "working_directory": "optional",
+    "supports_streaming": false,
+    "cancel_signal": "none"
+  },
+  "models": {
+    "default": "generic-test-model",
+    "supported": [
+      "generic-test-model"
+    ]
+  },
+  "capabilities": {
+    "filesystem_read": false,
+    "filesystem_write": false,
+    "shell": false,
+    "git": false,
+    "browser": false,
+    "mcp": false,
+    "remote_execution": false,
+    "worktree": false,
+    "direct_directory": false
+  },
+  "permissions": {
+    "requires_directory_grant": false,
+    "recommended_directory_lock": "none",
+    "provider_permission_modes": [
+      "default"
+    ],
+    "supports_permission_events": false
+  },
+  "environment": {
+    "required": [],
+    "optional": []
+  },
+  "security": {
+    "runs_locally": true,
+    "sends_code_to_vendor": false,
+    "data_policy_url": null,
+    "review_level": "experimental"
+  }
+}

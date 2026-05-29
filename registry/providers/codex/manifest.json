@@ -1,0 +1,81 @@
+{
+  "schema_version": "1",
+  "id": "codex",
+  "display_name": "Codex",
+  "status": "first_party",
+  "vendor": {
+    "name": "OpenAI",
+    "homepage": "https://openai.com",
+    "support_url": "https://help.openai.com"
+  },
+  "integration_type": "cli",
+  "description": "Codex CLI provider manifest for local OpenDaemon registry metadata.",
+  "install": {
+    "macos": [
+      "Install Codex from OpenAI's current documentation."
+    ],
+    "linux": [
+      "Install Codex from OpenAI's current documentation."
+    ],
+    "windows": [
+      "Install Codex from OpenAI's current documentation."
+    ]
+  },
+  "detect": {
+    "commands": [
+      "codex"
+    ],
+    "version_args": [
+      "--version"
+    ],
+    "version_regex": null
+  },
+  "execution": {
+    "command": "codex",
+    "args": [],
+    "input_mode": "stdin",
+    "working_directory": "optional",
+    "supports_streaming": true,
+    "cancel_signal": "SIGTERM"
+  },
+  "models": {
+    "default": "gpt-5-codex",
+    "supported": [
+      "gpt-5-codex",
+      "gpt-5"
+    ]
+  },
+  "capabilities": {
+    "filesystem_read": true,
+    "filesystem_write": true,
+    "shell": true,
+    "git": true,
+    "browser": true,
+    "mcp": true,
+    "remote_execution": true,
+    "worktree": true,
+    "direct_directory": true
+  },
+  "permissions": {
+    "requires_directory_grant": true,
+    "recommended_directory_lock": "exclusive",
+    "provider_permission_modes": [
+      "default",
+      "read_only",
+      "plan"
+    ],
+    "supports_permission_events": false
+  },
+  "environment": {
+    "required": [],
+    "optional": [
+      "OPENAI_API_KEY"
+    ]
+  },
+  "security": {
+    "runs_locally": true,
+    "sends_code_to_vendor": true,
+    "data_policy_url": "https://openai.com/policies/privacy-policy",
+    "review_level": "standard"
+  }
+}

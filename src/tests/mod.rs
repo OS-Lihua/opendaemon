@@ -1,139 +1,153 @@
+mod api;
+mod cli;
+mod registry;
+
 use std::{
-    io::{Read, Write},
-    net::{IpAddr, TcpStream},
-    time::Duration,
+    fs,
+    path::{Path, PathBuf},
 };
 
-use clap::error::ErrorKind;
-use tokio::{net::TcpListener, sync::oneshot, time::timeout};
+use serde_json::{Value, json};
 
-use crate::{
-    api::{HealthResponse, health, router},
-    cli::{Cli, Command, run_daemon_until_shutdown},
-    config::DaemonConfig,
-};
-
-#[test]
-fn cli_parser_accepts_daemon() {
-    let cli = Cli::parse_from_for_test(["opendaemon", "daemon"]).unwrap();
-
-    assert!(matches!(cli.command_for_test(), Command::Daemon(_)));
-}
-
-#[test]
-fn cli_parser_uses_default_daemon_bind_address() {
-    let cli = Cli::parse_from_for_test(["opendaemon", "daemon"]).unwrap();
-    let config = cli.command_for_test().daemon_args_for_test().config();
-
-    assert_eq!(
-        config,
-        DaemonConfig::new(IpAddr::from([127, 0, 0, 1]), 19514)
-    );
-}
-
-#[test]
-fn cli_parser_accepts_host_and_port_overrides() {
-    let cli = Cli::parse_from_for_test([
-        "opendaemon",
-        "daemon",
-        "--host",
-        "127.0.0.2",
-        "--port",
-        "49152",
-    ])
-    .unwrap();
-    let config = cli.command_for_test().daemon_args_for_test().config();
-
-    assert_eq!(
-        config,
-        DaemonConfig::new(IpAddr::from([127, 0, 0, 2]), 49152)
-    );
-}
-
-#[test]
-fn cli_parser_accepts_ephemeral_port() {
-    let cli = Cli::parse_from_for_test(["opendaemon", "daemon", "--port", "0"]).unwrap();
-    let config = cli.command_for_test().daemon_args_for_test().config();
-
-    assert_eq!(config.port, 0);
-}
-
-#[test]
-fn cli_parser_rejects_invalid_arguments() {
-    let error =
-        Cli::parse_from_for_test(["opendaemon", "daemon", "--port", "invalid"]).unwrap_err();
-
-    assert_eq!(error.kind(), ErrorKind::ValueValidation);
-}
-
-#[tokio::test]
-async fn health_handler_returns_stable_json() {
-    let response = health().await.0;
-
-    assert_eq!(
-        response,
-        HealthResponse {
-            status: "ok",
-            service: "opendaemon",
-            version: env!("CARGO_PKG_VERSION"),
-        }
-    );
-}
-
-#[tokio::test]
-async fn router_serves_health_endpoint() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, router())
-            .with_graceful_shutdown(async {
-                let _ = shutdown_rx.await;
-            })
-            .await
-            .unwrap();
-    });
-
-    let response = tokio::task::spawn_blocking(move || {
-        let mut stream = TcpStream::connect(addr).unwrap();
-        stream
-            .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-            .unwrap();
-
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response).unwrap();
-        String::from_utf8(response).unwrap()
-    })
-    .await
-    .unwrap();
-
-    shutdown_tx.send(()).unwrap();
-    server.await.unwrap();
-
-    let expected = format!(
-        r#"{{"status":"ok","service":"opendaemon","version":"{}"}}"#,
-        env!("CARGO_PKG_VERSION")
-    );
-
-    assert!(response.starts_with("HTTP/1.1 200 OK"));
-    assert!(response.ends_with(&expected));
-}
-
-#[tokio::test]
-async fn daemon_binds_ephemeral_port_and_stops_on_shutdown_signal() {
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let server = tokio::spawn(run_daemon_until_shutdown(
-        DaemonConfig::new(IpAddr::from([127, 0, 0, 1]), 0),
-        async {
-            let _ = shutdown_rx.await;
+fn valid_manifest_json() -> Value {
+    json!({
+        "schema_version": "1",
+        "id": "test-provider",
+        "display_name": "Test Provider",
+        "status": "community",
+        "vendor": {
+            "name": "Test Vendor",
+            "homepage": "https://example.invalid",
+            "support_url": null
         },
-    ));
+        "integration_type": "cli",
+        "description": "Provider fixture for tests.",
+        "install": {
+            "macos": ["Install test-provider."],
+            "linux": ["Install test-provider."],
+            "windows": ["Install test-provider."]
+        },
+        "detect": {
+            "commands": ["test-provider"],
+            "version_args": ["--version"],
+            "version_regex": null
+        },
+        "execution": {
+            "command": "test-provider",
+            "args": [],
+            "input_mode": "stdin",
+            "working_directory": "optional",
+            "supports_streaming": false,
+            "cancel_signal": "none"
+        },
+        "models": {
+            "default": "test-model",
+            "supported": ["test-model"]
+        },
+        "capabilities": {
+            "filesystem_read": false,
+            "filesystem_write": false,
+            "shell": false,
+            "git": false,
+            "browser": false,
+            "mcp": false,
+            "remote_execution": false,
+            "worktree": false,
+            "direct_directory": false
+        },
+        "permissions": {
+            "requires_directory_grant": false,
+            "recommended_directory_lock": "none",
+            "provider_permission_modes": ["default"],
+            "supports_permission_events": false
+        },
+        "environment": {
+            "required": [],
+            "optional": []
+        },
+        "security": {
+            "runs_locally": true,
+            "sends_code_to_vendor": false,
+            "data_policy_url": null,
+            "review_level": "experimental"
+        }
+    })
+}
 
-    shutdown_tx.send(()).unwrap();
+fn temp_registry_with_provider(provider_dir: &str, manifest: Value) -> (TempDir, PathBuf) {
+    let temp_dir = TempDir::new();
+    let providers_dir = temp_dir.path().join("registry/providers");
+    fs::create_dir_all(&providers_dir).unwrap();
+    write_provider_fixture(&providers_dir, provider_dir, manifest);
 
-    let result = timeout(Duration::from_secs(5), server)
-        .await
+    (temp_dir, providers_dir)
+}
+
+fn write_provider_fixture(providers_dir: &Path, provider_dir: &str, manifest: Value) {
+    let dir = providers_dir.join(provider_dir);
+    fs::create_dir_all(dir.join("examples")).unwrap();
+    fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    fs::write(dir.join("README.md"), "# Test Provider\n").unwrap();
+    fs::write(
+        dir.join("examples/basic.task.json"),
+        r#"{"provider":"test-provider","prompt":"test"}"#,
+    )
+    .unwrap();
+}
+
+fn replace_manifest_field(
+    providers_dir: &Path,
+    provider_dir: &str,
+    update: impl FnOnce(&mut Value),
+) {
+    let path = providers_dir.join(provider_dir).join("manifest.json");
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    update(&mut manifest);
+    fs::write(path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+}
+
+#[derive(Debug)]
+struct TempDir {
+    path: PathBuf,
+}
+
+impl TempDir {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "opendaemon-registry-test-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&path).unwrap();
+
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn unique_suffix() -> u128 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+    let counter = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .unwrap();
-    result.unwrap();
+        .as_nanos();
+
+    elapsed + u128::from(counter)
 }

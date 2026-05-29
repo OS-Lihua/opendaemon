@@ -1,0 +1,68 @@
+use std::net::IpAddr;
+
+use clap::error::ErrorKind;
+
+use crate::{
+    cli::{Cli, Command},
+    config::DaemonConfig,
+};
+
+#[test]
+fn cli_parser_accepts_daemon() {
+    let cli = Cli::parse_from_for_test(["opendaemon", "daemon"]).unwrap();
+
+    assert!(matches!(cli.command_for_test(), Command::Daemon(_)));
+}
+
+#[test]
+fn cli_parser_accepts_registry_check() {
+    let cli = Cli::parse_from_for_test(["opendaemon", "registry-check"]).unwrap();
+
+    assert!(matches!(cli.command_for_test(), Command::RegistryCheck));
+}
+
+#[test]
+fn cli_parser_uses_default_daemon_bind_address() {
+    let cli = Cli::parse_from_for_test(["opendaemon", "daemon"]).unwrap();
+    let config = cli.command_for_test().daemon_args_for_test().config();
+
+    assert_eq!(
+        config,
+        DaemonConfig::new(IpAddr::from([127, 0, 0, 1]), 19514)
+    );
+}
+
+#[test]
+fn cli_parser_accepts_host_and_port_overrides() {
+    let cli = Cli::parse_from_for_test([
+        "opendaemon",
+        "daemon",
+        "--host",
+        "127.0.0.2",
+        "--port",
+        "49152",
+    ])
+    .unwrap();
+    let config = cli.command_for_test().daemon_args_for_test().config();
+
+    assert_eq!(
+        config,
+        DaemonConfig::new(IpAddr::from([127, 0, 0, 2]), 49152)
+    );
+}
+
+#[test]
+fn cli_parser_accepts_ephemeral_port() {
+    let cli = Cli::parse_from_for_test(["opendaemon", "daemon", "--port", "0"]).unwrap();
+    let config = cli.command_for_test().daemon_args_for_test().config();
+
+    assert_eq!(config.port, 0);
+}
+
+#[test]
+fn cli_parser_rejects_invalid_arguments() {
+    let error =
+        Cli::parse_from_for_test(["opendaemon", "daemon", "--port", "invalid"]).unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::ValueValidation);
+}

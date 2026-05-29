@@ -67,6 +67,10 @@ e2e:
 build *ARGS="--workspace":
     cargo build {{ARGS}} --all-features
 
+# validate committed provider registry fixtures and manifest schema freshness
+registry-check:
+    cargo run -- registry-check
+
 # run prek
 prek *ARGS="-a":
     prek run {{ARGS}}

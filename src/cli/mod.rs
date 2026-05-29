@@ -7,6 +7,7 @@ use tokio::{net::TcpListener, signal};
 use crate::{
     api,
     config::{DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT, DaemonConfig},
+    registry,
 };
 
 #[derive(Debug, Parser)]
@@ -19,6 +20,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Daemon(DaemonArgs),
+    RegistryCheck,
 }
 
 #[derive(Debug, Args)]
@@ -43,6 +45,7 @@ pub async fn run() -> anyhow::Result<()> {
 pub async fn run_with_args(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Command::Daemon(args) => run_daemon_until_shutdown(args.config(), shutdown_signal()).await,
+        Command::RegistryCheck => registry::check_default_registry(),
     }
 }
 
@@ -90,6 +93,7 @@ impl Command {
     pub const fn daemon_args_for_test(&self) -> &DaemonArgs {
         match self {
             Self::Daemon(args) => args,
+            Self::RegistryCheck => panic!("registry-check does not have daemon args"),
         }
     }
 }
