@@ -1,6 +1,6 @@
 [package]
-name = "template"
-authors = ["unic <yuniqueunic@gmail.com>"]
+name = "opendaemon"
+authors = ["OpenDaemon contributors"]
 version = "0.1.0"
 edition = "2024"
 
@@ -15,12 +15,13 @@ exclude = [
 
 [dependencies]
 anyhow = "1"
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
-
-
-[dev-dependencies]
-assert_fs= "1"
-rstest = "0.26"
 
 
 [profile.release]
@@ -36,9 +37,9 @@ strip = "debuginfo"
 [package.metadata.release]
 pre-release-replacements = [
     # Update inline-table dependency snippets like:
-    # template = { version = "0.2", features = ["custom"] }
-    { file = "README.md", search = "template\\s*=\\s*\\{\\s*version\\s*=\\s*\"[0-9]+\\.[0-9]+(\\.[0-9]+)?(-[0-9A-Za-z.-]+)?\"", replace = "template = { version = \"{{version}}\"" },
+    # opendaemon = { version = "0.2", features = ["custom"] }
+    { file = "README.md", search = "opendaemon\\s*=\\s*\\{\\s*version\\s*=\\s*\"[0-9]+\\.[0-9]+(\\.[0-9]+)?(-[0-9A-Za-z.-]+)?\"", replace = "opendaemon = { version = \"{{version}}\"" },
     # Update plain dependency snippets like:
-    # template = "0.2"
-    { file = "README.md", search = "template\\s*=\\s*\"[0-9]+\\.[0-9]+(\\.[0-9]+)?(-[0-9A-Za-z.-]+)?\"", replace = "template = \"{{version}}\"", min = 0 },
+    # opendaemon = "0.2"
+    { file = "README.md", search = "opendaemon\\s*=\\s*\"[0-9]+\\.[0-9]+(\\.[0-9]+)?(-[0-9A-Za-z.-]+)?\"", replace = "opendaemon = \"{{version}}\"", min = 0 },
 ]

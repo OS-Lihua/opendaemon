@@ -1,14 +1,14 @@
-## README
+# OpenDaemon
 
-The readme for whole project.
+Local daemon foundation for coordinating OpenDaemon providers and tasks.
 
 ### DEV
 
-TODO
+Phase 0 provides the project identity, CLI entrypoint, daemon HTTP server, and
+health endpoint.
 
 #### Tests
 
-unit tests and basically integration tests are should
+Unit and integration-style tests live in the Rust crate.
 
-e2e tests are should place at `e2e` dir which use `uv` + `python` to write the
-e2e tests.
+E2E tests should live in the `e2e` directory and use `uv` plus Python.
