@@ -1,12 +1,14 @@
 use axum::{
     Json,
-    extract::Path,
+    extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
 
-use crate::registry::{self, IntegrationType, ProviderManifest, ProviderStatus};
+use crate::registry::{IntegrationType, ProviderManifest, ProviderStatus};
+
+use super::AppState;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ProviderListResponse {
@@ -39,8 +41,8 @@ pub struct ErrorBody {
     pub message: String,
 }
 
-pub async fn list() -> Result<Json<ProviderListResponse>, ApiError> {
-    let registry = registry::load_default_registry()?;
+pub async fn list(State(state): State<AppState>) -> Result<Json<ProviderListResponse>, ApiError> {
+    let registry = state.load_registry()?;
     let providers = registry
         .providers()
         .iter()
@@ -51,9 +53,10 @@ pub async fn list() -> Result<Json<ProviderListResponse>, ApiError> {
 }
 
 pub async fn get(
+    State(state): State<AppState>,
     Path(provider_id): Path<String>,
 ) -> Result<Json<SingleProviderResponse>, ApiError> {
-    let registry = registry::load_default_registry()?;
+    let registry = state.load_registry()?;
     let provider = registry
         .get(&provider_id)
         .ok_or(ApiError::ProviderNotFound)?

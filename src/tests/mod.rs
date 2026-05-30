@@ -1,6 +1,7 @@
 mod api;
 mod cli;
 mod registry;
+mod runtime;
 
 use std::{
     fs,
@@ -108,6 +109,12 @@ fn replace_manifest_field(
     let mut manifest: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     update(&mut manifest);
     fs::write(path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+}
+
+static RUNTIME_DETECTION_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn runtime_detection_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    RUNTIME_DETECTION_TEST_LOCK.lock().await
 }
 
 #[derive(Debug)]

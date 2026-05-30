@@ -1,0 +1,46 @@
+use std::{collections::BTreeMap, sync::Arc};
+
+use tokio::sync::RwLock;
+
+use crate::registry::{IntegrationType, ProviderManifest};
+
+use super::model::RuntimeView;
+
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeStore {
+    runtimes: Arc<RwLock<BTreeMap<String, RuntimeView>>>,
+}
+
+impl RuntimeStore {
+    pub async fn save(&self, runtime: RuntimeView) {
+        self.runtimes
+            .write()
+            .await
+            .insert(runtime.provider_id.clone(), runtime);
+    }
+
+    pub async fn save_all(&self, runtimes: impl IntoIterator<Item = RuntimeView>) {
+        let mut stored = self.runtimes.write().await;
+
+        for runtime in runtimes {
+            stored.insert(runtime.provider_id.clone(), runtime);
+        }
+    }
+
+    pub async fn list_for_providers(&self, providers: &[ProviderManifest]) -> Vec<RuntimeView> {
+        let stored = self.runtimes.read().await;
+        let mut runtimes = providers
+            .iter()
+            .filter(|provider| provider.integration_type == IntegrationType::Cli)
+            .map(|provider| {
+                stored
+                    .get(&provider.id)
+                    .cloned()
+                    .unwrap_or_else(|| RuntimeView::not_detected(provider.id.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        runtimes.sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
+        runtimes
+    }
+}
