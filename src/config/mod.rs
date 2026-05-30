@@ -2,12 +2,16 @@ use std::{
     collections::BTreeMap,
     ffi::OsString,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::PathBuf,
     time::Duration,
 };
 
 pub const DEFAULT_DAEMON_HOST: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 pub const DEFAULT_DAEMON_PORT: u16 = 19514;
 pub const DEFAULT_RUNTIME_DETECTION_TIMEOUT: Duration = Duration::from_secs(2);
+const APP_QUALIFIER: &str = "dev";
+const APP_ORGANIZATION: &str = "OpenDaemon";
+const APP_NAME: &str = "OpenDaemon";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DaemonConfig {
@@ -98,5 +102,27 @@ impl RuntimeEnvironment {
     #[must_use]
     pub fn path(&self) -> Option<OsString> {
         self.var_os("PATH")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreConfig {
+    pub sqlite_path: PathBuf,
+}
+
+impl StoreConfig {
+    #[must_use]
+    pub const fn new(sqlite_path: PathBuf) -> Self {
+        Self { sqlite_path }
+    }
+}
+
+impl Default for StoreConfig {
+    fn default() -> Self {
+        let sqlite_path = directories::ProjectDirs::from(APP_QUALIFIER, APP_ORGANIZATION, APP_NAME)
+            .map(|dirs| dirs.data_local_dir().join("opendaemon.sqlite3"))
+            .unwrap_or_else(|| PathBuf::from("opendaemon.sqlite3"));
+
+        Self { sqlite_path }
     }
 }

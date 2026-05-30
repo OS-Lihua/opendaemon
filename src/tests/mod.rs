@@ -1,5 +1,7 @@
+mod agents;
 mod api;
 mod cli;
+mod directories;
 mod registry;
 mod runtime;
 

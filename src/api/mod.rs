@@ -5,10 +5,14 @@ use axum::{
     routing::{get, post},
 };
 
+pub(crate) mod agents;
+pub(crate) mod directories;
 mod health;
 mod providers;
 mod runtimes;
 
+pub use agents::{AgentListResponse, AgentResponse, SingleAgentResponse};
+pub use directories::{DirectoryListResponse, DirectoryResponse, SingleDirectoryResponse};
 pub use health::{HealthResponse, health};
 pub use providers::{
     ErrorBody, ErrorResponse, ProviderListResponse, ProviderResponse, SingleProviderResponse,
@@ -16,11 +20,22 @@ pub use providers::{
 pub use runtimes::{RuntimeListResponse, RuntimeResponse};
 
 use crate::{
-    config::RuntimeDetectionConfig,
+    config::{RuntimeDetectionConfig, StoreConfig},
     registry::{self, ProviderRegistry},
     runtime::store::RuntimeStore,
+    store::{agent_profiles::AgentProfileStore, directory_grants::DirectoryGrantStore},
 };
 
+#[cfg(test)]
+pub(crate) use agents::{
+    create as agent_create, delete as agent_delete, get as agent_get, list as agent_list,
+    patch as agent_patch,
+};
+#[cfg(test)]
+pub(crate) use directories::{
+    create as directory_create, delete as directory_delete, get as directory_get,
+    list as directory_list, patch as directory_patch,
+};
 #[cfg(test)]
 pub(crate) use providers::{
     ApiError as ProviderApiError, get as provider_get, list as provider_list,
@@ -33,6 +48,8 @@ pub struct AppState {
     providers_dir: PathBuf,
     runtime_store: RuntimeStore,
     runtime_detection_config: RuntimeDetectionConfig,
+    directory_grant_store: DirectoryGrantStore,
+    agent_profile_store: AgentProfileStore,
 }
 
 impl AppState {
@@ -42,10 +59,44 @@ impl AppState {
         runtime_store: RuntimeStore,
         runtime_detection_config: RuntimeDetectionConfig,
     ) -> Self {
+        Self::with_directory_grant_store(
+            providers_dir,
+            runtime_store,
+            runtime_detection_config,
+            DirectoryGrantStore::configured(StoreConfig::default()),
+        )
+    }
+
+    #[must_use]
+    pub fn with_directory_grant_store(
+        providers_dir: PathBuf,
+        runtime_store: RuntimeStore,
+        runtime_detection_config: RuntimeDetectionConfig,
+        directory_grant_store: DirectoryGrantStore,
+    ) -> Self {
+        Self::with_stores(
+            providers_dir,
+            runtime_store,
+            runtime_detection_config,
+            directory_grant_store,
+            AgentProfileStore::configured(StoreConfig::default()),
+        )
+    }
+
+    #[must_use]
+    pub fn with_stores(
+        providers_dir: PathBuf,
+        runtime_store: RuntimeStore,
+        runtime_detection_config: RuntimeDetectionConfig,
+        directory_grant_store: DirectoryGrantStore,
+        agent_profile_store: AgentProfileStore,
+    ) -> Self {
         Self {
             providers_dir,
             runtime_store,
             runtime_detection_config,
+            directory_grant_store,
+            agent_profile_store,
         }
     }
 
@@ -62,14 +113,26 @@ impl AppState {
     pub fn runtime_detection_config(&self) -> &RuntimeDetectionConfig {
         &self.runtime_detection_config
     }
+
+    #[must_use]
+    pub fn directory_grant_store(&self) -> &DirectoryGrantStore {
+        &self.directory_grant_store
+    }
+
+    #[must_use]
+    pub fn agent_profile_store(&self) -> &AgentProfileStore {
+        &self.agent_profile_store
+    }
 }
 
 impl Default for AppState {
     fn default() -> Self {
-        Self::new(
+        Self::with_stores(
             registry::default_providers_dir(),
             RuntimeStore::default(),
             RuntimeDetectionConfig::default(),
+            DirectoryGrantStore::configured(StoreConfig::default()),
+            AgentProfileStore::configured(StoreConfig::default()),
         )
     }
 }
@@ -85,5 +148,18 @@ pub fn router_with_state(state: AppState) -> Router {
         .route("/v1/providers/{provider_id}", get(providers::get))
         .route("/v1/runtimes", get(runtimes::list))
         .route("/v1/runtimes/detect", post(runtimes::detect))
+        .route("/v1/agents", get(agents::list).post(agents::create))
+        .route(
+            "/v1/agents/{agent_id}",
+            get(agents::get).patch(agents::patch).delete(agents::delete),
+        )
+        .route("/v1/directories", get(directories::list))
+        .route("/v1/directories/grant", post(directories::create))
+        .route(
+            "/v1/directories/{directory_id}",
+            get(directories::get)
+                .patch(directories::patch)
+                .delete(directories::delete),
+        )
         .with_state(state)
 }
