@@ -4,6 +4,7 @@ mod cli;
 mod directories;
 mod registry;
 mod runtime;
+mod tasks;
 
 use std::{
     fs,

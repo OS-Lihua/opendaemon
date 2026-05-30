@@ -9,6 +9,7 @@ use std::{
 pub const DEFAULT_DAEMON_HOST: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 pub const DEFAULT_DAEMON_PORT: u16 = 19514;
 pub const DEFAULT_RUNTIME_DETECTION_TIMEOUT: Duration = Duration::from_secs(2);
+pub const DEFAULT_MAX_CONCURRENT_TASKS: usize = 1;
 const APP_QUALIFIER: &str = "dev";
 const APP_ORGANIZATION: &str = "OpenDaemon";
 const APP_NAME: &str = "OpenDaemon";
@@ -108,6 +109,19 @@ impl RuntimeEnvironment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreConfig {
     pub sqlite_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SchedulerConfig {
+    pub max_concurrent_tasks: usize,
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_tasks: DEFAULT_MAX_CONCURRENT_TASKS,
+        }
+    }
 }
 
 impl StoreConfig {

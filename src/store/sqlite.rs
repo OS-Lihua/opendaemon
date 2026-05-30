@@ -53,6 +53,61 @@ fn initialize_schema(connection: &Connection) -> Result<(), rusqlite::Error> {
 
         CREATE INDEX IF NOT EXISTS agent_profiles_provider_idx
         ON agent_profiles(provider_id);
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            owner_product_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            directory_id TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            required_capabilities_json TEXT NOT NULL,
+            workspace_mode TEXT NOT NULL,
+            direct_mode_task_opt_in INTEGER NOT NULL,
+            metadata_json TEXT,
+            provider_id TEXT NOT NULL,
+            model TEXT NOT NULL,
+            permission_mode TEXT NOT NULL,
+            timeout_seconds INTEGER,
+            status TEXT NOT NULL,
+            result_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            cancelled_at TEXT,
+            failed_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS tasks_owner_product_idx ON tasks(owner_product_id);
+        CREATE INDEX IF NOT EXISTS tasks_agent_idx ON tasks(agent_id);
+        CREATE INDEX IF NOT EXISTS tasks_directory_idx ON tasks(directory_id);
+        CREATE INDEX IF NOT EXISTS tasks_status_idx ON tasks(status);
+
+        CREATE TABLE IF NOT EXISTS task_events (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(task_id, sequence)
+        );
+
+        CREATE INDEX IF NOT EXISTS task_events_task_idx
+        ON task_events(task_id, sequence);
+
+        CREATE TABLE IF NOT EXISTS directory_locks (
+            directory_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            released_at TEXT,
+            PRIMARY KEY(directory_id, task_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS directory_locks_active_idx
+        ON directory_locks(directory_id, status);
         "#,
     )
 }
