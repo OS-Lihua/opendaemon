@@ -399,7 +399,132 @@ async fn terminal_callback_is_idempotent_for_repeated_delivery_attempts() {
 }
 
 #[tokio::test]
-async fn fake_control_plane_websocket_dispatches_and_receives_completion_callback() {
+async fn lifecycle_callbacks_cover_claim_start_fail_and_cancelled() {
+    let temp_dir = TempDir::new();
+    let (app_state, grant, _task_store) = control_plane_test_app(&temp_dir);
+    let dispatch =
+        crate::control_plane::dispatch::ControlPlaneDispatchService::new(app_state.clone());
+    let callback_service = crate::control_plane::client::ControlPlaneCallbackService::default();
+    let task_store = app_state.task_store().clone();
+
+    let task = dispatch
+        .ingest(crate::control_plane::protocol::RemoteDispatchTask {
+            remote_task_id: "remote_task_2".to_owned(),
+            owner_product_id: "product".to_owned(),
+            agent_id: "agent".to_owned(),
+            directory_id: grant.id.clone(),
+            prompt: "Do remote work".to_owned(),
+            required_capabilities: vec!["read".to_owned()],
+            workspace_mode: "worktree".to_owned(),
+            timeout_seconds: Some(45),
+            task_token: "task-token-2".to_owned(),
+            metadata: json!({"source":"control_plane"}),
+        })
+        .await
+        .unwrap();
+
+    let claimed = task_store
+        .transition(
+            &task.id,
+            crate::task::model::TaskStatus::WaitingDirectoryLock,
+            None,
+        )
+        .unwrap();
+    let claimed_callback = callback_service
+        .callback_for_task_state(&claimed)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claimed_callback["event"], "task.claimed");
+
+    let running = task_store
+        .transition(&task.id, crate::task::model::TaskStatus::Preparing, None)
+        .unwrap();
+    let _ = callback_service.callback_for_task_state(&running).unwrap();
+    let running = task_store
+        .transition(&task.id, crate::task::model::TaskStatus::Running, None)
+        .unwrap();
+    let running_callback = callback_service
+        .callback_for_task_state(&running)
+        .unwrap()
+        .unwrap();
+    assert_eq!(running_callback["event"], "task.started");
+
+    let cancelled = dispatch.cancel_remote_task("remote_task_2").unwrap();
+    assert_eq!(cancelled.status, crate::task::model::TaskStatus::Cancelled);
+    let cancelled_event = task_store
+        .list_events_after(&cancelled.id, 0)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.event_type == crate::task::event::TaskEventType::Cancelled)
+        .unwrap();
+    let cancelled_callback = callback_service
+        .callback_for_event(&task_store, &cancelled_event)
+        .unwrap()
+        .unwrap();
+    assert_eq!(cancelled_callback["event"], "task.cancelled");
+
+    let failed_task = dispatch
+        .ingest(crate::control_plane::protocol::RemoteDispatchTask {
+            remote_task_id: "remote_task_3".to_owned(),
+            owner_product_id: "product".to_owned(),
+            agent_id: "agent".to_owned(),
+            directory_id: grant.id,
+            prompt: "Do remote work".to_owned(),
+            required_capabilities: vec!["read".to_owned()],
+            workspace_mode: "worktree".to_owned(),
+            timeout_seconds: Some(45),
+            task_token: "task-token-3".to_owned(),
+            metadata: json!({"source":"control_plane"}),
+        })
+        .await
+        .unwrap();
+    let claimed = task_store
+        .transition(
+            &failed_task.id,
+            crate::task::model::TaskStatus::WaitingDirectoryLock,
+            None,
+        )
+        .unwrap();
+    let _ = callback_service.callback_for_task_state(&claimed).unwrap();
+    let running = task_store
+        .transition(
+            &failed_task.id,
+            crate::task::model::TaskStatus::Preparing,
+            None,
+        )
+        .unwrap();
+    let _ = callback_service.callback_for_task_state(&running).unwrap();
+    let running = task_store
+        .transition(
+            &failed_task.id,
+            crate::task::model::TaskStatus::Running,
+            None,
+        )
+        .unwrap();
+    let _ = callback_service.callback_for_task_state(&running).unwrap();
+    task_store
+        .transition(
+            &failed_task.id,
+            crate::task::model::TaskStatus::Failed,
+            Some(json!({"error": "boom"})),
+        )
+        .unwrap();
+    let failed_event = task_store
+        .list_events_after(&failed_task.id, 0)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.event_type == crate::task::event::TaskEventType::Failed)
+        .unwrap();
+    let failed_callback = callback_service
+        .callback_for_event(&task_store, &failed_event)
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed_callback["event"], "task.failed");
+    assert_eq!(failed_callback["error"], "boom");
+}
+
+#[tokio::test]
+async fn fake_control_plane_websocket_dispatches_and_receives_lifecycle_callbacks() {
     let temp_dir = TempDir::new();
     let (app_state, grant, _task_store) = control_plane_test_app(&temp_dir);
     let daemon_state_store = crate::store::daemon_state::DaemonStateStore::open(StoreConfig::new(
@@ -531,6 +656,20 @@ async fn fake_control_plane_websocket_dispatches_and_receives_completion_callbac
             None,
         )
         .unwrap();
+    let claimed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(payload) = message_rx.recv().await
+                && payload["type"] == "task_callback"
+                && payload["event"] == "task.claimed"
+            {
+                break payload;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(claimed["remote_task_id"], "remote_task_1");
+
     app_state
         .task_store()
         .transition(
@@ -547,6 +686,20 @@ async fn fake_control_plane_websocket_dispatches_and_receives_completion_callbac
             None,
         )
         .unwrap();
+    let started = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(payload) = message_rx.recv().await
+                && payload["type"] == "task_callback"
+                && payload["event"] == "task.started"
+            {
+                break payload;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(started["remote_task_id"], "remote_task_1");
+
     app_state
         .task_store()
         .transition(
@@ -574,6 +727,367 @@ async fn fake_control_plane_websocket_dispatches_and_receives_completion_callbac
     assert_eq!(callback["event"], "task.completed");
     assert_eq!(callback["remote_task_id"], "remote_task_1");
     assert_eq!(callback["task_token"], "task-token-1");
+
+    client_run.abort();
+    let _ = client_run.await;
+    server.await.unwrap();
+}
+
+#[test]
+fn control_plane_auth_rejects_daemon_and_task_token_misuse() {
+    let validator = crate::control_plane::client::ControlPlaneAuthValidator::default();
+
+    assert_eq!(
+        validator
+            .validate_daemon_token("daemon-token", "daemon-token")
+            .unwrap_err()
+            .code(),
+        "control_plane_auth_failed"
+    );
+    assert_eq!(
+        validator
+            .validate_task_callback(
+                "remote_task_1",
+                "task-token-1",
+                &json!({
+                    "control_plane": {
+                        "remote_task_id": "remote_task_1",
+                        "task_token": "task-token-2"
+                    }
+                }),
+                "daemon-token",
+                "task.failed#1"
+            )
+            .unwrap_err()
+            .code(),
+        "control_plane_auth_failed"
+    );
+}
+
+#[test]
+fn control_plane_auth_rejects_task_token_replay_or_mismatch() {
+    let validator = crate::control_plane::client::ControlPlaneAuthValidator::default();
+    let metadata = json!({
+        "control_plane": {
+            "remote_task_id": "remote_task_1",
+            "task_token": "task-token-1"
+        }
+    });
+
+    validator
+        .validate_task_callback(
+            "remote_task_1",
+            "task-token-1",
+            &metadata,
+            "daemon-token",
+            "task.completed#7",
+        )
+        .unwrap();
+    assert_eq!(
+        validator
+            .validate_task_callback(
+                "remote_task_1",
+                "task-token-1",
+                &metadata,
+                "daemon-token",
+                "task.completed#7",
+            )
+            .unwrap_err()
+            .code(),
+        "control_plane_task_token_replay"
+    );
+    assert_eq!(
+        validator
+            .validate_task_callback(
+                "remote_task_2",
+                "task-token-1",
+                &metadata,
+                "daemon-token",
+                "task.completed#7",
+            )
+            .unwrap_err()
+            .code(),
+        "control_plane_auth_failed"
+    );
+}
+
+#[test]
+fn control_plane_auth_allows_same_task_token_for_distinct_lifecycle_callbacks() {
+    let validator = crate::control_plane::client::ControlPlaneAuthValidator::default();
+    let metadata = json!({
+        "control_plane": {
+            "remote_task_id": "remote_task_1",
+            "task_token": "task-token-1"
+        }
+    });
+
+    validator
+        .validate_task_callback(
+            "remote_task_1",
+            "task-token-1",
+            &metadata,
+            "daemon-token",
+            "task.claimed#1",
+        )
+        .unwrap();
+    validator
+        .validate_task_callback(
+            "remote_task_1",
+            "task-token-1",
+            &metadata,
+            "daemon-token",
+            "task.started#2",
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn fake_control_plane_reconnects_with_persisted_identity_without_duplicate_task() {
+    let temp_dir = TempDir::new();
+    let (app_state, grant, _task_store) = control_plane_test_app(&temp_dir);
+    let daemon_state_store = crate::store::daemon_state::DaemonStateStore::open(StoreConfig::new(
+        temp_dir.path().join("daemon-state.sqlite3"),
+    ))
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (message_tx, mut message_rx) = tokio::sync::mpsc::channel::<serde_json::Value>(32);
+    let grant_id = grant.id.clone();
+
+    let server = tokio::spawn(async move {
+        for connection_index in 0..2 {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+
+            let register = socket.next().await.unwrap().unwrap();
+            let register = match register {
+                Message::Text(text) => serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+                other => panic!("unexpected register frame: {other:?}"),
+            };
+            message_tx.send(register).await.unwrap();
+
+            socket
+                .send(Message::Text(
+                    json!({
+                        "type": "registration_accepted",
+                        "registration": {
+                            "daemon_id": "daemon_123",
+                            "daemon_token": "daemon-token",
+                            "session_id": "session_1",
+                            "registered_at": "2026-06-07T00:00:00Z"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .await
+                .unwrap();
+
+            socket
+                .send(Message::Text(
+                    json!({
+                        "type": "task_dispatch",
+                        "task": {
+                            "remote_task_id": "remote_task_1",
+                            "owner_product_id": "product",
+                            "agent_id": "agent",
+                            "directory_id": grant_id,
+                            "prompt": "Do remote work",
+                            "required_capabilities": ["read"],
+                            "workspace_mode": "worktree",
+                            "timeout_seconds": 45,
+                            "task_token": "task-token-1",
+                            "metadata": {"source": "control_plane"}
+                        }
+                    })
+                    .to_string(),
+                ))
+                .await
+                .unwrap();
+
+            if connection_index == 0 {
+                socket.close(None).await.unwrap();
+            } else {
+                break;
+            }
+        }
+    });
+
+    let config = ControlPlaneConfig {
+        endpoint: Some(format!("ws://{addr}")),
+        enrollment_secret: Some("enroll-secret".to_owned()),
+        heartbeat_interval: Duration::from_millis(50),
+        ..ControlPlaneConfig::default()
+    };
+    let registration = crate::control_plane::registration::DaemonRegistrationService::new(
+        config.clone(),
+        daemon_state_store.clone(),
+    );
+    let handler = crate::control_plane::client::ControlPlaneMessageHandler::new(
+        crate::control_plane::dispatch::ControlPlaneDispatchService::new(app_state.clone()),
+        daemon_state_store,
+    );
+    let client = crate::control_plane::client::ControlPlaneClient::new(
+        config,
+        registration,
+        handler,
+        app_state.runtime_store().clone(),
+        app_state.task_store().clone(),
+        app_state.task_event_bus().clone(),
+    );
+    let client_run = tokio::spawn(async move { client.run().await.unwrap() });
+
+    let first_register = tokio::time::timeout(Duration::from_secs(5), message_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        first_register["registration"]["daemon_id"],
+        serde_json::Value::Null
+    );
+
+    let second_register = tokio::time::timeout(Duration::from_secs(5), message_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(second_register["registration"]["daemon_id"], "daemon_123");
+    assert_eq!(second_register["registration"]["session_id"], "session_1");
+
+    let tasks = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let tasks = app_state.task_store().list(Default::default()).unwrap();
+            if !tasks.is_empty() {
+                break tasks;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(tasks.len(), 1);
+
+    client_run.abort();
+    let _ = client_run.await;
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn runtime_status_is_published_and_marks_offline_after_heartbeat_expiry() {
+    let temp_dir = TempDir::new();
+    let (app_state, _grant, _task_store) = control_plane_test_app(&temp_dir);
+    app_state
+        .runtime_store()
+        .save(crate::runtime::model::RuntimeView::available(
+            "codex",
+            "/fake/codex".into(),
+            Some("1.0.0".to_owned()),
+        ))
+        .await;
+    let daemon_state_store = crate::store::daemon_state::DaemonStateStore::open(StoreConfig::new(
+        temp_dir.path().join("daemon-state.sqlite3"),
+    ))
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (message_tx, mut message_rx) = tokio::sync::mpsc::channel::<serde_json::Value>(32);
+    let stale_registered_at = (time::OffsetDateTime::now_utc() - time::Duration::seconds(120))
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+
+        let register = socket.next().await.unwrap().unwrap();
+        let register = match register {
+            Message::Text(text) => serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+            other => panic!("unexpected register frame: {other:?}"),
+        };
+        message_tx.send(register).await.unwrap();
+
+        socket
+            .send(Message::Text(
+                json!({
+                    "type": "registration_accepted",
+                    "registration": {
+                        "daemon_id": "daemon_123",
+                        "daemon_token": "daemon-token",
+                        "session_id": "session_1",
+                        "registered_at": stale_registered_at
+                    }
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+
+        while let Some(frame) = socket.next().await {
+            let frame = frame.unwrap();
+            if let Message::Text(text) = frame {
+                let payload = serde_json::from_str::<serde_json::Value>(&text).unwrap();
+                message_tx.send(payload.clone()).await.unwrap();
+                if payload["type"] == "runtime_status" && payload["daemon_status"] == "offline" {
+                    break;
+                }
+            }
+        }
+    });
+
+    let config = ControlPlaneConfig {
+        endpoint: Some(format!("ws://{addr}")),
+        enrollment_secret: Some("enroll-secret".to_owned()),
+        heartbeat_interval: Duration::from_millis(50),
+        staleness_threshold: Duration::from_millis(75),
+    };
+    let registration = crate::control_plane::registration::DaemonRegistrationService::new(
+        config.clone(),
+        daemon_state_store.clone(),
+    );
+    let handler = crate::control_plane::client::ControlPlaneMessageHandler::new(
+        crate::control_plane::dispatch::ControlPlaneDispatchService::new(app_state.clone()),
+        daemon_state_store,
+    );
+    let client = crate::control_plane::client::ControlPlaneClient::new(
+        config,
+        registration,
+        handler,
+        app_state.runtime_store().clone(),
+        app_state.task_store().clone(),
+        app_state.task_event_bus().clone(),
+    );
+    let client_run = tokio::spawn(async move { client.run().await.unwrap() });
+
+    let _register = tokio::time::timeout(Duration::from_secs(5), message_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    let online = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(payload) = message_rx.recv().await
+                && payload["type"] == "runtime_status"
+                && payload["daemon_status"] == "online"
+            {
+                break payload;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(online["runtimes"][0]["provider_id"], "codex");
+
+    let offline = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(payload) = message_rx.recv().await
+                && payload["type"] == "runtime_status"
+                && payload["daemon_status"] == "offline"
+            {
+                break payload;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(offline["runtimes"][0]["provider_id"], "codex");
 
     client_run.abort();
     let _ = client_run.await;

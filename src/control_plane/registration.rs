@@ -79,4 +79,14 @@ impl DaemonRegistrationService {
             })
             .map_err(DaemonRegistrationError::Store)
     }
+
+    pub fn current_record(
+        &self,
+    ) -> Result<Option<DaemonRegistrationRecord>, DaemonRegistrationError> {
+        match self.store.get_current() {
+            Ok(record) => Ok(Some(record)),
+            Err(DaemonStateStoreError::NotFound) => Ok(None),
+            Err(error) => Err(DaemonRegistrationError::Store(error)),
+        }
+    }
 }
