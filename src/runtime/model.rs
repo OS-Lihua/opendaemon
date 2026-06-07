@@ -8,6 +8,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 pub enum RuntimeKind {
     LocalCli,
     LocalAcp,
+    RemoteHttp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -172,7 +173,16 @@ pub fn runtime_id_for_kind(provider_id: &str, kind: RuntimeKind) -> String {
     match kind {
         RuntimeKind::LocalCli => runtime_id(provider_id),
         RuntimeKind::LocalAcp => acp_runtime_id(provider_id),
+        RuntimeKind::RemoteHttp => http_runtime_id(provider_id),
     }
+}
+
+#[must_use]
+pub fn http_runtime_id(provider_id: &str) -> String {
+    format!(
+        "rt_{}_remote_http",
+        normalize_provider_id(provider_id, LetterCase::Lower)
+    )
 }
 
 #[must_use]

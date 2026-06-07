@@ -48,6 +48,7 @@ pub struct CreateDirectoryGrantRequest {
     pub default_workspace_mode: Option<WorkspaceMode>,
     pub lock_policy: Option<DirectoryLockPolicy>,
     pub direct_mode_requires_explicit_task_opt_in: Option<bool>,
+    pub allow_remote_execution: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +58,7 @@ pub struct PatchDirectoryGrantRequest {
     pub default_workspace_mode: Option<WorkspaceMode>,
     pub lock_policy: Option<DirectoryLockPolicy>,
     pub direct_mode_requires_explicit_task_opt_in: Option<bool>,
+    pub allow_remote_execution: Option<bool>,
 }
 
 pub async fn list(
@@ -208,6 +210,7 @@ impl From<CreateDirectoryGrantRequest> for CreateDirectoryGrant {
             lock_policy: request.lock_policy,
             direct_mode_requires_explicit_task_opt_in: request
                 .direct_mode_requires_explicit_task_opt_in,
+            allow_remote_execution: request.allow_remote_execution,
         }
     }
 }
@@ -221,6 +224,7 @@ impl From<PatchDirectoryGrantRequest> for PatchDirectoryGrant {
             lock_policy: request.lock_policy,
             direct_mode_requires_explicit_task_opt_in: request
                 .direct_mode_requires_explicit_task_opt_in,
+            allow_remote_execution: request.allow_remote_execution,
         }
     }
 }

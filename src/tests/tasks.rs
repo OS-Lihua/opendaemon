@@ -42,7 +42,7 @@ use crate::{
         service::{TaskStreamFrame, is_terminal_event_type},
         state::{TaskTransition, validate_transition},
     },
-    tests::TempDir,
+    tests::{TempDir, valid_http_manifest_json, write_provider_fixture},
 };
 
 #[test]
@@ -208,6 +208,53 @@ fn task_store_persists_filters_transitions_events_results_and_locks() {
         "Task completed."
     );
     assert_eq!(fetched.result.unwrap().changed_files, ["src/lib.rs"]);
+}
+
+#[tokio::test]
+async fn task_create_requires_remote_execution_scope_for_http_provider_override() {
+    let temp_dir = TempDir::new();
+    let providers_dir = temp_dir.path().join("providers");
+    std::fs::create_dir_all(&providers_dir).unwrap();
+    let mut manifest = valid_http_manifest_json();
+    manifest["id"] = json!("codex");
+    manifest["display_name"] = json!("Codex Remote");
+    manifest["models"]["default"] = json!("gpt-5-codex");
+    manifest["models"]["supported"] = json!(["gpt-5-codex"]);
+    write_provider_fixture(&providers_dir, "codex", manifest);
+    let state = fixture_state_with_providers(
+        temp_dir.path(),
+        providers_dir,
+        true,
+        SchedulerConfig::default(),
+    );
+    let grant = create_fixture_grant(temp_dir.path(), "product", "agent", true, false);
+
+    let error = task_create(
+        product_auth("product", &[ApiScope::TasksCreate]),
+        State(state),
+        Json(CreateTaskRequest {
+            owner_product_id: "product".to_owned(),
+            agent_id: "agent".to_owned(),
+            directory_id: grant.id,
+            prompt: "Run remote".to_owned(),
+            required_capabilities: Some(vec![DirectoryCapability::Read]),
+            workspace_mode: Some(DirectoryWorkspaceMode::Direct),
+            direct_mode_task_opt_in: true,
+            metadata: None,
+            provider_id: Some("codex".to_owned()),
+            model: Some("gpt-5-codex".to_owned()),
+            permission_mode: None,
+            timeout_seconds: Some(30),
+        }),
+    )
+    .await
+    .unwrap_err()
+    .into_response();
+
+    assert_eq!(error.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(error.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "insufficient_scope");
 }
 
 #[tokio::test]
@@ -1087,6 +1134,46 @@ fn fixture_state(root: &Path, allow_direct: bool) -> AppState {
     fixture_state_with_scheduler_config(root, allow_direct, SchedulerConfig::default())
 }
 
+fn fixture_state_with_providers(
+    root: &Path,
+    providers_dir: std::path::PathBuf,
+    allow_direct: bool,
+    scheduler_config: SchedulerConfig,
+) -> AppState {
+    let profile_store = temp_profile_store(root);
+    profile_store
+        .create(CreateAgentProfile {
+            id: "agent".to_owned(),
+            name: "Test Agent".to_owned(),
+            owner_product_id: "product".to_owned(),
+            provider_id: "codex".to_owned(),
+            model: "gpt-5-codex".to_owned(),
+            instructions: None,
+            execution_policy: ExecutionPolicy {
+                default_workspace_mode: if allow_direct {
+                    crate::agent::profile::WorkspaceMode::Direct
+                } else {
+                    crate::agent::profile::WorkspaceMode::Worktree
+                },
+                allow_direct_directory: allow_direct,
+            },
+            provider_config: ProviderConfig::default(),
+        })
+        .unwrap();
+
+    AppState::with_task_store(
+        providers_dir,
+        RuntimeStore::default(),
+        RuntimeDetectionConfig::default(),
+        AuthConfig::default(),
+        temp_product_store(root),
+        temp_directory_store(root),
+        profile_store,
+        temp_task_store(root),
+        scheduler_config,
+    )
+}
+
 fn fixture_state_with_scheduler_config(
     root: &Path,
     allow_direct: bool,
@@ -1165,6 +1252,7 @@ fn create_fixture_grant(
                 DirectoryLockPolicy::Shared
             }),
             direct_mode_requires_explicit_task_opt_in: Some(true),
+            allow_remote_execution: Some(false),
         })
         .unwrap()
 }

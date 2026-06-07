@@ -31,6 +31,18 @@ impl RuntimeStore {
         self.runtimes.read().await.get(provider_id).cloned()
     }
 
+    pub async fn snapshot(&self) -> Vec<RuntimeView> {
+        let mut runtimes = self
+            .runtimes
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        runtimes.sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
+        runtimes
+    }
+
     pub async fn list_for_providers(&self, providers: &[ProviderManifest]) -> Vec<RuntimeView> {
         let stored = self.runtimes.read().await;
         let mut runtimes = providers
@@ -38,7 +50,7 @@ impl RuntimeStore {
             .filter(|provider| {
                 matches!(
                     provider.integration_type,
-                    IntegrationType::Cli | IntegrationType::Acp
+                    IntegrationType::Cli | IntegrationType::Acp | IntegrationType::Http
                 )
             })
             .map(|provider| {
@@ -48,9 +60,8 @@ impl RuntimeStore {
                         match provider.integration_type {
                             IntegrationType::Cli => RuntimeKind::LocalCli,
                             IntegrationType::Acp => RuntimeKind::LocalAcp,
-                            IntegrationType::Http | IntegrationType::Native => {
-                                RuntimeKind::LocalCli
-                            }
+                            IntegrationType::Http => RuntimeKind::RemoteHttp,
+                            IntegrationType::Native => RuntimeKind::LocalCli,
                         },
                     )
                 })

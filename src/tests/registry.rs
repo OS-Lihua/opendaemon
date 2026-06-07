@@ -6,7 +6,7 @@ use crate::{
     registry::{self, ProviderManifest},
     tests::{
         replace_manifest_field, temp_registry_with_provider, valid_acp_manifest_json,
-        valid_manifest_json, write_provider_fixture,
+        valid_http_manifest_json, valid_manifest_json, write_provider_fixture,
     },
 };
 
@@ -209,6 +209,39 @@ fn validation_rejects_remote_execution_without_vendor_upload_disclosure() {
     });
 
     assert_registry_error_contains(&providers_dir, "remote_execution");
+}
+
+#[test]
+fn http_manifest_deserializes() {
+    let manifest: ProviderManifest = serde_json::from_value(valid_http_manifest_json()).unwrap();
+
+    assert_eq!(manifest.id, "test-provider");
+    assert_eq!(
+        manifest.integration_type,
+        crate::registry::IntegrationType::Http
+    );
+}
+
+#[test]
+fn validation_rejects_http_manifest_without_http_section() {
+    let (_temp_dir, providers_dir) =
+        temp_registry_with_provider("test-provider", valid_http_manifest_json());
+    replace_manifest_field(&providers_dir, "test-provider", |manifest| {
+        manifest.as_object_mut().unwrap().remove("http");
+    });
+
+    assert_registry_error_contains(&providers_dir, "http section is required");
+}
+
+#[test]
+fn validation_rejects_http_manifest_without_upload_disclosure() {
+    let (_temp_dir, providers_dir) =
+        temp_registry_with_provider("test-provider", valid_http_manifest_json());
+    replace_manifest_field(&providers_dir, "test-provider", |manifest| {
+        manifest["http"]["upload_mode"] = json!(null);
+    });
+
+    assert_registry_error_contains(&providers_dir, "upload_mode");
 }
 
 #[test]

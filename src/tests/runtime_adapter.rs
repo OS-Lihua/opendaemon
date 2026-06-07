@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use serde_json::{Value, json};
 
 use crate::{
@@ -18,6 +19,7 @@ use crate::{
     },
     scheduler::{
         execution::{ExecutionError, SchedulerExecutionService},
+        service::SchedulerService,
         workspace::FakeWorkspacePreparer,
     },
     security::directory::{DirectoryCapability, DirectoryLockPolicy, WorkspaceMode},
@@ -33,7 +35,10 @@ use crate::{
         permission::PermissionResponseRequest,
         service::{TaskEventBus, TaskEventService},
     },
-    tests::{TempDir, temp_registry_with_provider, valid_acp_manifest_json, valid_manifest_json},
+    tests::{
+        TempDir, temp_registry_with_provider, valid_acp_manifest_json, valid_http_manifest_json,
+        valid_manifest_json,
+    },
 };
 
 #[test]
@@ -87,15 +92,138 @@ async fn adapter_selection_gates_non_cli_integrations_without_spawning() {
         serde_json::from_value(valid_acp_manifest_json()).unwrap();
     assert!(selector.for_manifest(&acp).is_ok());
 
-    for (integration_type, code) in [
-        (IntegrationType::Http, "remote_execution_not_allowed"),
-        (IntegrationType::Native, "adapter_not_implemented"),
-    ] {
-        let mut manifest = cli.clone();
-        manifest.integration_type = integration_type;
-        let error = selector.for_manifest(&manifest).unwrap_err();
-        assert_eq!(error.code(), code);
-    }
+    let http: crate::registry::ProviderManifest =
+        serde_json::from_value(valid_http_manifest_json()).unwrap();
+    assert!(matches!(
+        selector.for_manifest(&http).unwrap(),
+        crate::runtime::adapter::SelectedAdapter::Http(_)
+    ));
+
+    let mut manifest = cli.clone();
+    manifest.integration_type = IntegrationType::Native;
+    let error = selector.for_manifest(&manifest).unwrap_err();
+    assert_eq!(error.code(), "adapter_not_implemented");
+}
+
+#[tokio::test]
+async fn http_adapter_executes_remote_request_and_records_remote_upload_metadata() {
+    let temp_dir = TempDir::new();
+    let workspace_root = temp_dir.path().join("workspace");
+    fs::create_dir_all(&workspace_root).unwrap();
+    fs::write(workspace_root.join("main.rs"), "fn main() {}\n").unwrap();
+
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let app = fake_http_provider(captured.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut manifest = valid_http_manifest_json();
+    manifest["http"]["endpoint"] = json!(format!("http://{addr}/v1/tasks"));
+    let (registry_temp, providers_dir) = temp_registry_with_provider("test-provider", manifest);
+    let store_config = StoreConfig::new(temp_dir.path().join("http.sqlite3"));
+    let agent_store = AgentProfileStore::open(store_config.clone()).unwrap();
+    let directory_store = DirectoryGrantStore::open(store_config.clone()).unwrap();
+    let task_store = TaskStore::open(store_config).unwrap();
+    agent_store
+        .create(CreateAgentProfile {
+            id: "agent".to_owned(),
+            name: "Agent".to_owned(),
+            owner_product_id: "product".to_owned(),
+            provider_id: "test-provider".to_owned(),
+            model: "test-model".to_owned(),
+            instructions: None,
+            execution_policy: ExecutionPolicy {
+                default_workspace_mode: crate::agent::profile::WorkspaceMode::Direct,
+                allow_direct_directory: true,
+            },
+            provider_config: ProviderConfig::default(),
+        })
+        .unwrap();
+    let grant = directory_store
+        .create(CreateDirectoryGrant {
+            product_id: "product".to_owned(),
+            agent_id: "agent".to_owned(),
+            path: workspace_root.clone(),
+            capabilities: vec![DirectoryCapability::Read],
+            workspace_modes: Some(vec![WorkspaceMode::Direct]),
+            default_workspace_mode: Some(WorkspaceMode::Direct),
+            lock_policy: Some(DirectoryLockPolicy::Shared),
+            direct_mode_requires_explicit_task_opt_in: Some(true),
+            allow_remote_execution: Some(true),
+        })
+        .unwrap();
+    let task = SchedulerService::new(
+        task_store.clone(),
+        agent_store.clone(),
+        directory_store.clone(),
+        SchedulerConfig::default(),
+    )
+    .enqueue_task(CreateTask {
+        owner_product_id: "product".to_owned(),
+        agent_id: "agent".to_owned(),
+        directory_id: grant.id,
+        prompt: "Remote prompt".to_owned(),
+        required_capabilities: Some(vec![DirectoryCapability::Read]),
+        workspace_mode: Some(WorkspaceMode::Direct),
+        direct_mode_task_opt_in: true,
+        metadata: Some(json!({
+            "remote_execution": {
+                "approved_by_scope": true
+            }
+        })),
+        provider_id: None,
+        model: None,
+        permission_mode: None,
+        timeout_seconds: Some(5),
+    })
+    .unwrap();
+    let runtime_store = RuntimeStore::default();
+    runtime_store
+        .save(RuntimeView::available_with_kind(
+            "test-provider",
+            crate::runtime::model::RuntimeKind::RemoteHttp,
+            PathBuf::from(format!("http://{addr}/v1/tasks")),
+            None,
+        ))
+        .await;
+
+    let fixture = Fixture {
+        _registry_temp: registry_temp,
+        providers_dir,
+        runtime_store,
+        agent_store,
+        directory_store,
+        task_store: task_store.clone(),
+        task_event_service: TaskEventService::new(
+            task_store,
+            std::sync::Arc::new(TaskEventBus::default()),
+            Duration::from_secs(1),
+        ),
+    };
+
+    let completed = execution_service(&fixture)
+        .execute_task(&task.id)
+        .await
+        .unwrap();
+
+    assert_eq!(completed.status, TaskStatus::Completed);
+    let result = completed.result.unwrap();
+    assert_eq!(result.final_message, "remote provider completed");
+    assert_eq!(
+        result.provider_result.as_ref().unwrap()["remote_upload"]["upload_mode"],
+        "workspace_subset"
+    );
+    assert_eq!(
+        result.provider_result.as_ref().unwrap()["remote_upload"]["provider_id"],
+        "test-provider"
+    );
+    let captured = captured.lock().unwrap();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0]["task"]["prompt"], "Remote prompt");
+    assert!(captured[0]["opendaemon_auth"].is_null());
 }
 
 #[tokio::test]
@@ -307,7 +435,8 @@ async fn cli_adapter_removes_provider_secret_env_and_appends_custom_args() {
 
 #[tokio::test]
 async fn cli_adapter_copies_custom_env_keys_only_when_explicitly_enabled() {
-    let _guard = crate::tests::runtime_detection_test_guard().await;
+    let _runtime_guard = crate::tests::runtime_detection_test_guard().await;
+    let _env_guard = crate::tests::process_env_test_guard().await;
     unsafe {
         std::env::set_var("OPENDAEMON_ALLOWED_TEST_ENV", "visible");
     }
@@ -649,6 +778,31 @@ printf '{"type":"session.completed"}\n'
 "#
 }
 
+fn fake_http_provider(captured: std::sync::Arc<std::sync::Mutex<Vec<Value>>>) -> Router {
+    #[derive(Clone)]
+    struct ProviderState {
+        captured: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
+    }
+
+    async fn create_task(
+        State(state): State<ProviderState>,
+        Json(payload): Json<Value>,
+    ) -> (StatusCode, Json<Value>) {
+        state.captured.lock().unwrap().push(payload);
+        (
+            StatusCode::OK,
+            Json(json!({
+                "final_message": "remote provider completed",
+                "result": "ok"
+            })),
+        )
+    }
+
+    Router::new()
+        .route("/v1/tasks", post(create_task))
+        .with_state(ProviderState { captured })
+}
+
 fn fixture(
     root: &Path,
     executable: PathBuf,
@@ -695,6 +849,7 @@ fn fixture(
             default_workspace_mode: Some(WorkspaceMode::Direct),
             lock_policy: Some(DirectoryLockPolicy::Shared),
             direct_mode_requires_explicit_task_opt_in: Some(true),
+            allow_remote_execution: Some(false),
         })
         .unwrap();
     assert!(executable.exists() || executable.ends_with("missing-provider"));
@@ -747,6 +902,7 @@ fn acp_fixture(root: &Path, executable: PathBuf) -> Fixture {
             default_workspace_mode: Some(WorkspaceMode::Direct),
             lock_policy: Some(DirectoryLockPolicy::Shared),
             direct_mode_requires_explicit_task_opt_in: Some(true),
+            allow_remote_execution: Some(false),
         })
         .unwrap();
     assert!(executable.exists());
@@ -824,6 +980,7 @@ fn directory_grant(root: &Path) -> crate::security::directory::DirectoryGrant {
         default_workspace_mode: Some(WorkspaceMode::Direct),
         lock_policy: Some(DirectoryLockPolicy::Shared),
         direct_mode_requires_explicit_task_opt_in: Some(true),
+        allow_remote_execution: Some(false),
     })
     .unwrap()
 }

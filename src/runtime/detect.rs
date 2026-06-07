@@ -21,7 +21,10 @@ pub async fn detect_provider(
     match manifest.integration_type {
         IntegrationType::Cli => {}
         IntegrationType::Acp => return detect_acp_provider(manifest, config).await,
-        IntegrationType::Http | IntegrationType::Native => {
+        IntegrationType::Http => {
+            return detect_http_provider(manifest);
+        }
+        IntegrationType::Native => {
             return RuntimeView::error(
                 manifest.id.clone(),
                 None,
@@ -57,7 +60,7 @@ pub async fn detect_providers(
     for provider in providers.iter().filter(|provider| {
         matches!(
             provider.integration_type,
-            IntegrationType::Cli | IntegrationType::Acp
+            IntegrationType::Cli | IntegrationType::Acp | IntegrationType::Http
         )
     }) {
         runtimes.push(detect_provider(provider, config).await);
@@ -65,6 +68,39 @@ pub async fn detect_providers(
 
     runtimes.sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
     runtimes
+}
+
+fn detect_http_provider(manifest: &ProviderManifest) -> RuntimeView {
+    let Some(http) = &manifest.http else {
+        return RuntimeView::error_with_kind(
+            manifest.id.clone(),
+            RuntimeKind::RemoteHttp,
+            None,
+            RuntimeError::new(
+                "http_invalid_configuration",
+                "provider http configuration is missing",
+            ),
+        );
+    };
+
+    if http.endpoint.trim().is_empty() {
+        return RuntimeView::error_with_kind(
+            manifest.id.clone(),
+            RuntimeKind::RemoteHttp,
+            None,
+            RuntimeError::new(
+                "http_invalid_configuration",
+                "provider http endpoint is missing",
+            ),
+        );
+    }
+
+    RuntimeView::available_with_kind(
+        manifest.id.clone(),
+        RuntimeKind::RemoteHttp,
+        PathBuf::from(http.endpoint.clone()),
+        None,
+    )
 }
 
 async fn detect_acp_provider(
@@ -211,6 +247,14 @@ async fn run_version_probe(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    match &config.environment {
+        RuntimeEnvironment::System => {}
+        RuntimeEnvironment::Map(vars) => {
+            command.env_clear();
+            command.envs(vars);
+        }
+    }
 
     for env_key in manifest
         .environment

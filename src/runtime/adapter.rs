@@ -190,6 +190,7 @@ pub trait RuntimeAdapter: Send + Sync {
 pub struct AdapterSelector {
     cli: crate::runtime::cli::LocalCliAdapter,
     acp: crate::runtime::acp::LocalAcpAdapter,
+    http: crate::runtime::http::RemoteHttpAdapter,
 }
 
 impl AdapterSelector {
@@ -200,13 +201,10 @@ impl AdapterSelector {
         match manifest.integration_type {
             IntegrationType::Cli => Ok(SelectedAdapter::Cli(self.cli.clone())),
             IntegrationType::Acp => Ok(SelectedAdapter::Acp(self.acp.clone())),
+            IntegrationType::Http => Ok(SelectedAdapter::Http(self.http.clone())),
             IntegrationType::Native => Err(RuntimeAdapterError::new(
                 "adapter_not_implemented",
                 "provider adapter is not implemented",
-            )),
-            IntegrationType::Http => Err(RuntimeAdapterError::new(
-                "remote_execution_not_allowed",
-                "remote provider execution is not allowed",
             )),
         }
     }
@@ -216,6 +214,7 @@ impl AdapterSelector {
 pub enum SelectedAdapter {
     Cli(crate::runtime::cli::LocalCliAdapter),
     Acp(crate::runtime::acp::LocalAcpAdapter),
+    Http(crate::runtime::http::RemoteHttpAdapter),
 }
 
 impl RuntimeAdapter for SelectedAdapter {
@@ -226,6 +225,7 @@ impl RuntimeAdapter for SelectedAdapter {
         match self {
             Self::Cli(adapter) => adapter.execute(request),
             Self::Acp(adapter) => adapter.execute(request),
+            Self::Http(adapter) => adapter.execute(request),
         }
     }
 
@@ -236,6 +236,7 @@ impl RuntimeAdapter for SelectedAdapter {
         match self {
             Self::Cli(adapter) => adapter.cancel(task_id),
             Self::Acp(adapter) => adapter.cancel(task_id),
+            Self::Http(adapter) => adapter.cancel(task_id),
         }
     }
 }

@@ -11,9 +11,10 @@ use anyhow::Context;
 
 pub use manifest::{
     AcpConfig, AcpTransport, AcpWorkingDirectoryMode, CancelSignal, DetectConfig,
-    DirectoryLockMode, EnvironmentConfig, ExecutionConfig, ExecutionInputMode, InstallInstructions,
-    IntegrationType, ModelConfig, ProviderCapabilities, ProviderManifest, ProviderPermissions,
-    ProviderStatus, SecurityConfig, SecurityReviewLevel, VendorInfo, WorkingDirectoryMode,
+    DirectoryLockMode, EnvironmentConfig, ExecutionConfig, ExecutionInputMode, HttpAuthScheme,
+    HttpConfig, HttpUploadMode, InstallInstructions, IntegrationType, ModelConfig,
+    ProviderCapabilities, ProviderManifest, ProviderPermissions, ProviderStatus, SecurityConfig,
+    SecurityReviewLevel, VendorInfo, WorkingDirectoryMode,
 };
 
 pub const PROVIDERS_REGISTRY_PATH: &str = "registry/providers";

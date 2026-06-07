@@ -159,6 +159,7 @@ fn validate_manifest_fields(manifest: &ProviderManifest, errors: &mut Vec<String
     }
 
     validate_acp_fields(manifest, errors);
+    validate_http_fields(manifest, errors);
 }
 
 fn validate_acp_fields(manifest: &ProviderManifest, errors: &mut Vec<String>) {
@@ -210,6 +211,57 @@ fn validate_acp_fields(manifest: &ProviderManifest, errors: &mut Vec<String>) {
             if manifest.acp.is_some() {
                 errors.push(format!(
                     "provider {provider}: acp section is only allowed for acp integration"
+                ));
+            }
+        }
+    }
+}
+
+fn validate_http_fields(manifest: &ProviderManifest, errors: &mut Vec<String>) {
+    let provider = manifest.id.as_str();
+
+    match manifest.integration_type {
+        super::manifest::IntegrationType::Http => {
+            let Some(http) = &manifest.http else {
+                errors.push(format!(
+                    "provider {provider}: http section is required for http integration"
+                ));
+                return;
+            };
+
+            if http.endpoint.trim().is_empty() {
+                errors.push(format!(
+                    "provider {provider}: http.endpoint must not be empty"
+                ));
+            }
+
+            if http.supports_cancel
+                && http
+                    .cancel_endpoint
+                    .as_deref()
+                    .is_none_or(|endpoint| endpoint.trim().is_empty())
+            {
+                errors.push(format!(
+                    "provider {provider}: http.cancel_endpoint is required when supports_cancel is true"
+                ));
+            }
+
+            if !manifest.capabilities.remote_execution {
+                errors.push(format!(
+                    "provider {provider}: http integration requires capabilities.remote_execution"
+                ));
+            }
+
+            if manifest.security.runs_locally {
+                errors.push(format!(
+                    "provider {provider}: http integration requires security.runs_locally = false"
+                ));
+            }
+        }
+        _ => {
+            if manifest.http.is_some() {
+                errors.push(format!(
+                    "provider {provider}: http section is only allowed for http integration"
                 ));
             }
         }

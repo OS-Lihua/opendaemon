@@ -162,6 +162,55 @@
       ],
       "type": "string"
     },
+    "HttpAuthScheme": {
+      "enum": [
+        "none",
+        "bearer"
+      ],
+      "type": "string"
+    },
+    "HttpConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "auth_scheme": {
+          "$ref": "#/$defs/HttpAuthScheme"
+        },
+        "cancel_endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "supports_cancel": {
+          "type": "boolean"
+        },
+        "supports_streaming": {
+          "type": "boolean"
+        },
+        "upload_mode": {
+          "$ref": "#/$defs/HttpUploadMode"
+        }
+      },
+      "required": [
+        "endpoint",
+        "auth_scheme",
+        "upload_mode",
+        "supports_streaming",
+        "supports_cancel"
+      ],
+      "type": "object"
+    },
+    "HttpUploadMode": {
+      "enum": [
+        "workspace_subset",
+        "diff",
+        "context_only"
+      ],
+      "type": "string"
+    },
     "InstallInstructions": {
       "additionalProperties": false,
       "properties": {
@@ -402,6 +451,16 @@
     },
     "execution": {
       "$ref": "#/$defs/ExecutionConfig"
+    },
+    "http": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HttpConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "id": {
       "type": "string"

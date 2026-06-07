@@ -37,6 +37,7 @@ pub struct DirectoryGrant {
     pub default_workspace_mode: WorkspaceMode,
     pub lock_policy: DirectoryLockPolicy,
     pub direct_mode_requires_explicit_task_opt_in: bool,
+    pub allow_remote_execution: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -48,6 +49,7 @@ pub struct DirectoryGrantPolicy {
     pub default_workspace_mode: WorkspaceMode,
     pub lock_policy: DirectoryLockPolicy,
     pub direct_mode_requires_explicit_task_opt_in: bool,
+    pub allow_remote_execution: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +60,7 @@ pub struct DirectoryAuthorizationRequest {
     pub required_capabilities: Vec<DirectoryCapability>,
     pub requested_workspace_mode: WorkspaceMode,
     pub direct_mode_task_opt_in: bool,
+    pub remote_execution: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +103,7 @@ impl DirectoryGrantPolicy {
         default_workspace_mode: WorkspaceMode,
         lock_policy: DirectoryLockPolicy,
         direct_mode_requires_explicit_task_opt_in: bool,
+        allow_remote_execution: bool,
     ) -> Result<Self, DirectorySecurityError> {
         let capabilities = normalize_capabilities(capabilities)?;
         let workspace_modes = normalize_workspace_modes(workspace_modes)?;
@@ -109,6 +113,7 @@ impl DirectoryGrantPolicy {
             default_workspace_mode,
             lock_policy,
             direct_mode_requires_explicit_task_opt_in,
+            allow_remote_execution,
         };
         policy.validate()?;
         Ok(policy)
@@ -142,6 +147,7 @@ impl DirectoryGrant {
             lock_policy: self.lock_policy,
             direct_mode_requires_explicit_task_opt_in: self
                 .direct_mode_requires_explicit_task_opt_in,
+            allow_remote_execution: self.allow_remote_execution,
         }
     }
 
@@ -176,6 +182,9 @@ impl DirectoryGrant {
             && !request.direct_mode_task_opt_in
         {
             return Err(DirectorySecurityError::DirectModeNotAllowed);
+        }
+        if request.remote_execution && !self.allow_remote_execution {
+            return Err(DirectorySecurityError::AuthorizationFailed);
         }
         Ok(())
     }

@@ -85,6 +85,7 @@ fn directory_grant_policy_validation_rejects_invalid_combinations() {
             WorkspaceMode::Direct,
             DirectoryLockPolicy::Shared,
             true,
+            false,
         )
         .is_err()
     );
@@ -95,6 +96,7 @@ fn directory_grant_policy_validation_rejects_invalid_combinations() {
             WorkspaceMode::Direct,
             DirectoryLockPolicy::Shared,
             true,
+            false,
         )
         .is_err()
     );
@@ -105,6 +107,7 @@ fn directory_grant_policy_validation_rejects_invalid_combinations() {
             WorkspaceMode::Direct,
             DirectoryLockPolicy::Shared,
             true,
+            false,
         )
         .is_err()
     );
@@ -115,6 +118,7 @@ fn directory_grant_policy_validation_rejects_invalid_combinations() {
             WorkspaceMode::Direct,
             DirectoryLockPolicy::None,
             true,
+            false,
         )
         .is_err()
     );
@@ -282,6 +286,7 @@ fn authorization_helper_validates_scope_capabilities_and_workspace_policy() {
         required_capabilities: vec![DirectoryCapability::Read],
         requested_workspace_mode: WorkspaceMode::Direct,
         direct_mode_task_opt_in: true,
+        remote_execution: false,
     };
     assert_eq!(store.authorize(&request).unwrap(), grant);
 
@@ -667,5 +672,6 @@ fn create_grant(path: &Path, product_id: &str, agent_id: &str) -> CreateDirector
         default_workspace_mode: Some(WorkspaceMode::Direct),
         lock_policy: Some(DirectoryLockPolicy::Shared),
         direct_mode_requires_explicit_task_opt_in: Some(true),
+        allow_remote_execution: Some(false),
     }
 }

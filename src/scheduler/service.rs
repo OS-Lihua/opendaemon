@@ -36,6 +36,7 @@ pub enum TaskValidationError {
     ProviderOverrideNotAllowed,
     ModelOverrideNotAllowed,
     PermissionModeOverrideNotAllowed,
+    RemoteExecutionNotAllowed,
     DirectoryLockConflict,
     TaskAlreadyTerminal,
     Store(anyhow::Error),
@@ -103,6 +104,13 @@ impl SchedulerService {
                 required_capabilities: input.required_capabilities(),
                 requested_workspace_mode,
                 direct_mode_task_opt_in: input.direct_mode_task_opt_in,
+                remote_execution: input
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| {
+                        metadata["remote_execution"]["approved_by_scope"].as_bool()
+                    })
+                    .unwrap_or(false),
             })
             .map_err(map_directory_error)?;
 

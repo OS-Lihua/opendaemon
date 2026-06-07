@@ -15,7 +15,7 @@ use crate::{
         model::{RuntimeKind, RuntimeStatus, override_env_var_name, runtime_id},
         store::RuntimeStore,
     },
-    tests::{TempDir, valid_acp_manifest_json, valid_manifest_json},
+    tests::{TempDir, valid_acp_manifest_json, valid_http_manifest_json, valid_manifest_json},
 };
 
 #[test]
@@ -89,6 +89,23 @@ async fn acp_runtime_store_and_detection_return_acp_runtime_without_spawning() {
 
     let detected = detect_provider(&manifest, &RuntimeDetectionConfig::default()).await;
     assert_eq!(detected.kind, RuntimeKind::LocalAcp);
+}
+
+#[tokio::test]
+async fn http_runtime_store_and_detection_return_http_runtime_without_local_spawn() {
+    let store = RuntimeStore::default();
+    let manifest: ProviderManifest = serde_json::from_value(valid_http_manifest_json()).unwrap();
+
+    let listed = store
+        .list_for_providers(std::slice::from_ref(&manifest))
+        .await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].kind, RuntimeKind::RemoteHttp);
+    assert_eq!(listed[0].status, RuntimeStatus::NotDetected);
+
+    let detected = detect_provider(&manifest, &RuntimeDetectionConfig::default()).await;
+    assert_eq!(detected.kind, RuntimeKind::RemoteHttp);
+    assert_eq!(detected.status, RuntimeStatus::Available);
 }
 
 #[tokio::test]
@@ -242,6 +259,30 @@ async fn version_probe_parses_first_capture_from_stderr() {
 
     assert_eq!(runtime.status, RuntimeStatus::Available, "{runtime:#?}");
     assert_eq!(runtime.version.as_deref(), Some("7.8.9"));
+}
+
+#[tokio::test]
+async fn version_probe_uses_runtime_detection_environment_snapshot() {
+    let _guard = crate::tests::runtime_detection_test_guard().await;
+    let temp_dir = TempDir::new();
+    write_fake_command(
+        temp_dir.path(),
+        "test-provider",
+        r#"if [ "$OPENDAEMON_TEST_MARKER" = "from-config" ]; then echo "from-config"; else exit 9; fi"#,
+    );
+    let manifest = manifest_with_detect("test-provider", &["test-provider"], &["--version"], None);
+    let config = config_with_env([
+        ("PATH".to_owned(), temp_dir.path().as_os_str().to_owned()),
+        (
+            "OPENDAEMON_TEST_MARKER".to_owned(),
+            OsString::from("from-config"),
+        ),
+    ]);
+
+    let runtime = detect_provider(&manifest, &config).await;
+
+    assert_eq!(runtime.status, RuntimeStatus::Available, "{runtime:#?}");
+    assert_eq!(runtime.version.as_deref(), Some("from-config"));
 }
 
 #[tokio::test]

@@ -104,14 +104,45 @@ pub async fn list(
 pub async fn create(
     auth: ProductAuth,
     State(state): State<AppState>,
-    Json(request): Json<CreateTaskRequest>,
+    Json(mut request): Json<CreateTaskRequest>,
 ) -> Result<(StatusCode, Json<SingleTaskResponse>), ApiError> {
     auth.require_scope(ApiScope::TasksCreate)?;
     auth.ensure_product(&request.owner_product_id)?;
+    if requests_remote_execution(&state, &request)? {
+        auth.require_scope(ApiScope::TasksRemoteExecution)?;
+        mark_remote_execution_approved(&mut request);
+    }
     let service = scheduler_service(&state);
     let task = service.enqueue_task(request.into())?;
 
     Ok((StatusCode::CREATED, Json(SingleTaskResponse { task })))
+}
+
+fn requests_remote_execution(
+    state: &AppState,
+    request: &CreateTaskRequest,
+) -> Result<bool, ApiError> {
+    let Some(provider_id) = request.provider_id.as_deref() else {
+        return Ok(false);
+    };
+    let registry = state.load_registry().map_err(ApiError::TaskRegistry)?;
+    Ok(registry.get(provider_id).is_some_and(|provider| {
+        provider.manifest.integration_type == crate::registry::IntegrationType::Http
+    }))
+}
+
+fn mark_remote_execution_approved(request: &mut CreateTaskRequest) {
+    let mut metadata = request
+        .metadata
+        .take()
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(
+            "remote_execution".to_owned(),
+            serde_json::json!({ "approved_by_scope": true }),
+        );
+    }
+    request.metadata = Some(metadata);
 }
 
 pub async fn get(
@@ -249,6 +280,7 @@ pub enum ApiError {
     Auth(AuthError),
     Task(TaskValidationError),
     TaskEvents(TaskEventServiceError),
+    TaskRegistry(anyhow::Error),
 }
 
 impl From<AuthError> for ApiError {
@@ -281,6 +313,11 @@ impl IntoResponse for ApiError {
             Self::Auth(error) => (error.status(), error.code(), error.message().to_owned()),
             Self::Task(error) => task_error_response(error),
             Self::TaskEvents(error) => task_event_error_response(error),
+            Self::TaskRegistry(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "registry_error",
+                error.to_string(),
+            ),
         };
 
         (
@@ -416,6 +453,11 @@ fn task_error_response(error: TaskValidationError) -> (StatusCode, &'static str,
             StatusCode::BAD_REQUEST,
             "permission_mode_override_not_allowed",
             "permission mode override not allowed".to_owned(),
+        ),
+        TaskValidationError::RemoteExecutionNotAllowed => (
+            StatusCode::FORBIDDEN,
+            "remote_execution_not_allowed",
+            "remote execution not allowed".to_owned(),
         ),
         TaskValidationError::DirectoryLockConflict => (
             StatusCode::CONFLICT,

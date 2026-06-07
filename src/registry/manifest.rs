@@ -20,6 +20,7 @@ pub struct ProviderManifest {
     pub environment: EnvironmentConfig,
     pub security: SecurityConfig,
     pub acp: Option<AcpConfig>,
+    pub http: Option<HttpConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -140,6 +141,32 @@ pub enum AcpTransport {
 pub enum AcpWorkingDirectoryMode {
     Workspace,
     Provider,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HttpAuthScheme {
+    None,
+    Bearer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HttpUploadMode {
+    WorkspaceSubset,
+    Diff,
+    ContextOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HttpConfig {
+    pub endpoint: String,
+    pub auth_scheme: HttpAuthScheme,
+    pub upload_mode: HttpUploadMode,
+    pub supports_streaming: bool,
+    pub supports_cancel: bool,
+    pub cancel_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

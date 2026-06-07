@@ -68,8 +68,9 @@ fn cli_parser_rejects_invalid_arguments() {
     assert_eq!(error.kind(), ErrorKind::ValueValidation);
 }
 
-#[test]
-fn app_state_from_env_loads_bootstrap_token() {
+#[tokio::test]
+async fn app_state_from_env_loads_bootstrap_token() {
+    let _guard = crate::tests::process_env_test_guard().await;
     let key = "OPENDAEMON_BOOTSTRAP_TOKEN";
     let previous = std::env::var_os(key);
     unsafe {

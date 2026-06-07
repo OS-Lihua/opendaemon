@@ -225,7 +225,8 @@ fn runtime_available(runtime: &RuntimeView, integration_type: IntegrationType) -
         IntegrationType::Acp => {
             runtime.kind == RuntimeKind::LocalAcp && runtime.executable.is_some()
         }
-        IntegrationType::Http | IntegrationType::Native => false,
+        IntegrationType::Http => runtime.kind == RuntimeKind::RemoteHttp,
+        IntegrationType::Native => false,
     }
 }
 

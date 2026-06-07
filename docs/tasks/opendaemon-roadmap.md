@@ -1060,6 +1060,8 @@ Acceptance criteria:
 
 ### Phase 10: Control Plane
 
+Detailed plan: `docs/tasks/phase-10-control-plane.md`.
+
 Goal: support remote products and multiple machines.
 
 Tasks:

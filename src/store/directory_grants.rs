@@ -37,6 +37,7 @@ pub struct CreateDirectoryGrant {
     pub default_workspace_mode: Option<WorkspaceMode>,
     pub lock_policy: Option<DirectoryLockPolicy>,
     pub direct_mode_requires_explicit_task_opt_in: Option<bool>,
+    pub allow_remote_execution: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -46,6 +47,7 @@ pub struct PatchDirectoryGrant {
     pub default_workspace_mode: Option<WorkspaceMode>,
     pub lock_policy: Option<DirectoryLockPolicy>,
     pub direct_mode_requires_explicit_task_opt_in: Option<bool>,
+    pub allow_remote_execution: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -93,9 +95,10 @@ impl DirectoryGrantStore {
                     default_workspace_mode,
                     lock_policy,
                     direct_mode_requires_explicit_task_opt_in,
+                    allow_remote_execution,
                     created_at,
                     updated_at
-                ) VALUES ('', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                ) VALUES ('', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     input.product_id,
                     input.agent_id,
@@ -105,6 +108,7 @@ impl DirectoryGrantStore {
                     serialize_json(&policy.default_workspace_mode)?,
                     serialize_json(&policy.lock_policy)?,
                     policy.direct_mode_requires_explicit_task_opt_in,
+                    policy.allow_remote_execution,
                     now,
                     now,
                 ],
@@ -173,6 +177,7 @@ impl DirectoryGrantStore {
             && patch.default_workspace_mode.is_none()
             && patch.lock_policy.is_none()
             && patch.direct_mode_requires_explicit_task_opt_in.is_none()
+            && patch.allow_remote_execution.is_none()
         {
             return Err(DirectoryStoreError::Security(
                 DirectorySecurityError::AuthorizationFailed,
@@ -191,6 +196,9 @@ impl DirectoryGrantStore {
             patch
                 .direct_mode_requires_explicit_task_opt_in
                 .unwrap_or(policy.direct_mode_requires_explicit_task_opt_in),
+            patch
+                .allow_remote_execution
+                .unwrap_or(policy.allow_remote_execution),
         )
         .map_err(DirectoryStoreError::Security)?;
         let now = now_rfc3339()?;
@@ -205,14 +213,16 @@ impl DirectoryGrantStore {
                      default_workspace_mode = ?3,
                      lock_policy = ?4,
                      direct_mode_requires_explicit_task_opt_in = ?5,
-                     updated_at = ?6
-                 WHERE id = ?7",
+                     allow_remote_execution = ?6,
+                     updated_at = ?7
+                 WHERE id = ?8",
                 params![
                     serialize_json(&policy.capabilities)?,
                     serialize_json(&policy.workspace_modes)?,
                     serialize_json(&policy.default_workspace_mode)?,
                     serialize_json(&policy.lock_policy)?,
                     policy.direct_mode_requires_explicit_task_opt_in,
+                    policy.allow_remote_execution,
                     now,
                     id,
                 ],
@@ -300,6 +310,7 @@ fn policy_from_create(
         input
             .direct_mode_requires_explicit_task_opt_in
             .unwrap_or(true),
+        input.allow_remote_execution.unwrap_or(false),
     )
     .map_err(DirectoryStoreError::Security)
 }
@@ -354,6 +365,7 @@ fn row_to_grant(row: &rusqlite::Row<'_>) -> rusqlite::Result<DirectoryGrant> {
         lock_policy: deserialize_json(&lock_policy_json)?,
         direct_mode_requires_explicit_task_opt_in: row
             .get("direct_mode_requires_explicit_task_opt_in")?,
+        allow_remote_execution: row.get("allow_remote_execution")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })

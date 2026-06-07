@@ -66,9 +66,16 @@ where
     tracing::info!(%bound_addr, "opendaemon daemon listening");
 
     let state = api::AppState::from_env();
+    let control_plane = crate::control_plane::client::spawn_if_enabled(state.clone())?;
 
     axum::serve(listener, api::router_with_state(state))
-        .with_graceful_shutdown(shutdown_signal)
+        .with_graceful_shutdown(async move {
+            shutdown_signal.await;
+            if let Some(handle) = control_plane {
+                handle.abort();
+                let _ = handle.await;
+            }
+        })
         .await
         .context("daemon HTTP server failed")
 }

@@ -1,6 +1,7 @@
 mod agents;
 mod api;
 mod cli;
+mod control_plane;
 mod directories;
 mod registry;
 mod runtime;
@@ -95,6 +96,23 @@ fn valid_acp_manifest_json() -> Value {
     manifest
 }
 
+fn valid_http_manifest_json() -> Value {
+    let mut manifest = valid_manifest_json();
+    manifest["integration_type"] = json!("http");
+    manifest["capabilities"]["remote_execution"] = json!(true);
+    manifest["security"]["runs_locally"] = json!(false);
+    manifest["security"]["sends_code_to_vendor"] = json!(true);
+    manifest["http"] = json!({
+        "endpoint": "http://127.0.0.1:0/v1/tasks",
+        "auth_scheme": "none",
+        "upload_mode": "workspace_subset",
+        "supports_streaming": false,
+        "supports_cancel": false,
+        "cancel_endpoint": null
+    });
+    manifest
+}
+
 fn temp_registry_with_provider(provider_dir: &str, manifest: Value) -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new();
     let providers_dir = temp_dir.path().join("registry/providers");
@@ -132,9 +150,14 @@ fn replace_manifest_field(
 }
 
 static RUNTIME_DETECTION_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static PROCESS_ENV_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn runtime_detection_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
     RUNTIME_DETECTION_TEST_LOCK.lock().await
+}
+
+async fn process_env_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    PROCESS_ENV_TEST_LOCK.lock().await
 }
 
 #[derive(Debug)]

@@ -28,6 +28,7 @@ fn initialize_schema(connection: &Connection) -> Result<(), rusqlite::Error> {
             default_workspace_mode TEXT NOT NULL,
             lock_policy TEXT NOT NULL,
             direct_mode_requires_explicit_task_opt_in INTEGER NOT NULL,
+            allow_remote_execution INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -148,6 +149,17 @@ fn initialize_schema(connection: &Connection) -> Result<(), rusqlite::Error> {
 
         CREATE INDEX IF NOT EXISTS product_tokens_product_idx
         ON product_tokens(product_id, revoked_at);
+
+        CREATE TABLE IF NOT EXISTS daemon_state (
+            daemon_id TEXT PRIMARY KEY,
+            control_plane_url TEXT NOT NULL,
+            daemon_token TEXT NOT NULL,
+            status TEXT NOT NULL,
+            registered_at TEXT NOT NULL,
+            last_heartbeat_at TEXT,
+            last_error_code TEXT,
+            session_id TEXT
+        );
         "#,
     )
 }

@@ -17,7 +17,10 @@ use crate::{
     product::{ApiScope, ProductStatus},
     runtime::store::RuntimeStore,
     store::products::ProductStore,
-    tests::{TempDir, temp_registry_with_provider, valid_manifest_json, write_provider_fixture},
+    tests::{
+        TempDir, temp_registry_with_provider, valid_http_manifest_json, valid_manifest_json,
+        write_provider_fixture,
+    },
 };
 use tower::ServiceExt;
 
@@ -199,6 +202,23 @@ async fn runtimes_detect_updates_store_and_reports_missing_provider_unavailable(
     let latest_json: Value = serde_json::to_value(latest).unwrap();
     assert_eq!(latest_json["runtimes"][1]["status"], "available");
     assert_eq!(latest_json["runtimes"][1]["version"], "test-provider 2.3.4");
+}
+
+#[tokio::test]
+async fn runtimes_list_exposes_remote_http_runtime_without_detection_side_effects() {
+    let manifest = valid_http_manifest_json();
+    let (_temp_registry, providers_dir) = temp_registry_with_provider("test-provider", manifest);
+    let state = test_state(providers_dir, RuntimeDetectionConfig::default());
+
+    let response = runtime_list(product_auth(&[ApiScope::RuntimesRead]), State(state))
+        .await
+        .unwrap()
+        .0;
+    let json: Value = serde_json::to_value(response).unwrap();
+
+    assert_eq!(json["runtimes"][0]["provider_id"], "test-provider");
+    assert_eq!(json["runtimes"][0]["kind"], "remote_http");
+    assert_eq!(json["runtimes"][0]["status"], "not_detected");
 }
 
 fn test_state(

@@ -11,6 +11,8 @@ pub const DEFAULT_DAEMON_PORT: u16 = 19514;
 pub const DEFAULT_RUNTIME_DETECTION_TIMEOUT: Duration = Duration::from_secs(2);
 pub const DEFAULT_MAX_CONCURRENT_TASKS: usize = 1;
 pub const DEFAULT_TASK_EVENT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+pub const DEFAULT_CONTROL_PLANE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+pub const DEFAULT_CONTROL_PLANE_STALENESS_THRESHOLD: Duration = Duration::from_secs(45);
 const APP_QUALIFIER: &str = "dev";
 const APP_ORGANIZATION: &str = "OpenDaemon";
 const APP_NAME: &str = "OpenDaemon";
@@ -49,6 +51,42 @@ impl AuthConfig {
     pub fn from_env() -> Self {
         Self {
             bootstrap_token: std::env::var("OPENDAEMON_BOOTSTRAP_TOKEN").ok(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlPlaneConfig {
+    pub endpoint: Option<String>,
+    pub enrollment_secret: Option<String>,
+    pub heartbeat_interval: Duration,
+    pub staleness_threshold: Duration,
+}
+
+impl ControlPlaneConfig {
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self {
+            endpoint: std::env::var("OPENDAEMON_CONTROL_PLANE_URL").ok(),
+            enrollment_secret: std::env::var("OPENDAEMON_CONTROL_PLANE_ENROLLMENT_SECRET").ok(),
+            heartbeat_interval: DEFAULT_CONTROL_PLANE_HEARTBEAT_INTERVAL,
+            staleness_threshold: DEFAULT_CONTROL_PLANE_STALENESS_THRESHOLD,
+        }
+    }
+
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        self.endpoint.is_some() && self.enrollment_secret.is_some()
+    }
+}
+
+impl Default for ControlPlaneConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: None,
+            enrollment_secret: None,
+            heartbeat_interval: DEFAULT_CONTROL_PLANE_HEARTBEAT_INTERVAL,
+            staleness_threshold: DEFAULT_CONTROL_PLANE_STALENESS_THRESHOLD,
         }
     }
 }
