@@ -341,6 +341,7 @@ fn scheduler_allows_shared_read_locks_and_enforces_global_capacity() {
         state.directory_grant_store().clone(),
         SchedulerConfig {
             max_concurrent_tasks: 1,
+            ..SchedulerConfig::default()
         },
     );
     let grant = create_fixture_grant(temp_dir.path(), "product", "agent", false, false);

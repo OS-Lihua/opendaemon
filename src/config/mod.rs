@@ -114,12 +114,14 @@ pub struct StoreConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SchedulerConfig {
     pub max_concurrent_tasks: usize,
+    pub allow_agent_custom_env: bool,
 }
 
 impl Default for SchedulerConfig {
     fn default() -> Self {
         Self {
             max_concurrent_tasks: DEFAULT_MAX_CONCURRENT_TASKS,
+            allow_agent_custom_env: false,
         }
     }
 }

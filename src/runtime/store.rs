@@ -27,6 +27,10 @@ impl RuntimeStore {
         }
     }
 
+    pub async fn get(&self, provider_id: &str) -> Option<RuntimeView> {
+        self.runtimes.read().await.get(provider_id).cloned()
+    }
+
     pub async fn list_for_providers(&self, providers: &[ProviderManifest]) -> Vec<RuntimeView> {
         let stored = self.runtimes.read().await;
         let mut runtimes = providers

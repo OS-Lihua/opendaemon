@@ -256,6 +256,35 @@ impl TaskStore {
         Ok(())
     }
 
+    pub fn save_execution_result(&self, result: &TaskResult) -> Result<(), TaskStoreError> {
+        let connection = self.connection()?;
+        connection
+            .execute(
+                "UPDATE tasks SET result_json = ?1, updated_at = ?2 WHERE id = ?3",
+                params![serialize_json(result)?, result.updated_at, result.task_id],
+            )
+            .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub fn append_event(
+        &self,
+        task_id: &str,
+        event_type: TaskEventType,
+        payload: Value,
+    ) -> Result<TaskEvent, TaskStoreError> {
+        self.get(task_id)?;
+        let now = now_rfc3339()?;
+        let sequence = self.next_sequence(task_id)?;
+        let connection = self.connection()?;
+        insert_event_tx(&connection, task_id, sequence, event_type, payload, &now)?;
+        Ok(self
+            .list_events(task_id)?
+            .into_iter()
+            .find(|event| event.sequence == sequence)
+            .expect("inserted task event must be readable"))
+    }
+
     pub fn list_events(&self, task_id: &str) -> Result<Vec<TaskEvent>, TaskStoreError> {
         let connection = self.connection()?;
         let mut statement = connection

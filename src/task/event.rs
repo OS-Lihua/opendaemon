@@ -20,6 +20,10 @@ pub enum TaskEventType {
     Cancelled,
     #[serde(rename = "task.timed_out")]
     TimedOut,
+    #[serde(rename = "process.stdout")]
+    ProcessStdout,
+    #[serde(rename = "process.stderr")]
+    ProcessStderr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
