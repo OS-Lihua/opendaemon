@@ -26,6 +26,7 @@ directories = "6"
 rusqlite = { version = "0.32", features = ["bundled"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "process", "sync", "time", "io-util"] }
+tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 which = "7"

@@ -319,6 +319,9 @@ impl From<TaskStoreError> for TaskValidationError {
     fn from(error: TaskStoreError) -> Self {
         match error {
             TaskStoreError::NotFound => Self::TaskNotFound,
+            TaskStoreError::PermissionRequestNotFound
+            | TaskStoreError::PermissionRequestNotPending
+            | TaskStoreError::PermissionRequestAlreadyResolved => Self::InvalidTaskState,
             TaskStoreError::Model(error) => map_model_error(error),
             TaskStoreError::State(crate::task::state::TaskStateError::AlreadyTerminal) => {
                 Self::TaskAlreadyTerminal

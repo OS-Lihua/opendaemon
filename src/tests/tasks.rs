@@ -1,19 +1,21 @@
 use std::{fs, path::Path};
+use std::time::Duration;
 
 use axum::{
     Json,
     body::to_bytes,
     extract::{Path as AxumPath, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
 };
 use serde_json::{Value, json};
+use tokio::time::timeout;
 
 use crate::{
     agent::profile::{CreateAgentProfile, ExecutionPolicy, ProviderConfig},
     api::{
-        AppState, task_cancel, task_create, task_get, task_list,
-        tasks::{CreateTaskRequest, TaskListQuery},
+        AppState, task_cancel, task_create, task_events, task_get, task_list, task_post_event,
+        tasks::{CreateTaskRequest, TaskEventRequest, TaskEventsQuery, TaskListQuery},
     },
     config::{RuntimeDetectionConfig, SchedulerConfig, StoreConfig},
     runtime::store::RuntimeStore,
@@ -31,8 +33,10 @@ use crate::{
         tasks::{TaskFilters, TaskStore},
     },
     task::{
-        event::TaskEventType,
+        event::{PermissionDecision, PermissionRequestEvent, TaskEventType},
         model::{CreateTask, TaskStatus},
+        permission::PermissionRequestStatus,
+        service::{TaskStreamFrame, is_terminal_event_type},
         state::{TaskTransition, validate_transition},
     },
     tests::TempDir,
@@ -201,6 +205,190 @@ fn task_store_persists_filters_transitions_events_results_and_locks() {
         "Task completed."
     );
     assert_eq!(fetched.result.unwrap().changed_files, ["src/lib.rs"]);
+}
+
+#[tokio::test]
+async fn task_event_service_replays_from_cursor_tails_live_and_emits_heartbeat() {
+    let temp_dir = TempDir::new();
+    let state = fixture_state_with_scheduler_config(
+        temp_dir.path(),
+        false,
+        SchedulerConfig {
+            task_event_heartbeat_interval: Duration::from_millis(25),
+            ..SchedulerConfig::default()
+        },
+    );
+    let grant = create_fixture_grant(temp_dir.path(), "product", "agent", false, false);
+    let task = state
+        .task_store()
+        .create(create_task_input("product", "agent", &grant.id))
+        .unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::WaitingDirectoryLock, None)
+        .unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::Preparing, None)
+        .unwrap();
+    let service = state.task_event_service();
+    let mut stream = service.stream(&task.id, 1).unwrap();
+
+    match timeout(Duration::from_secs(1), stream.recv()).await.unwrap() {
+        Some(TaskStreamFrame::Event(event)) => {
+            assert_eq!(event.sequence, 2);
+            assert_eq!(event.event_type, TaskEventType::WaitingDirectoryLock);
+        }
+        other => panic!("unexpected frame: {other:?}"),
+    }
+
+    match timeout(Duration::from_secs(1), stream.recv()).await.unwrap() {
+        Some(TaskStreamFrame::Event(event)) => {
+            assert_eq!(event.sequence, 3);
+            assert_eq!(event.event_type, TaskEventType::Preparing);
+        }
+        other => panic!("unexpected frame: {other:?}"),
+    }
+
+    match timeout(Duration::from_millis(200), stream.recv()).await.unwrap() {
+        Some(TaskStreamFrame::Heartbeat) => {}
+        other => panic!("unexpected frame: {other:?}"),
+    }
+
+    state
+        .task_store()
+        .append_event(
+            &task.id,
+            TaskEventType::ProcessStdout,
+            json!({"text":"hello","stream":"stdout"}),
+        )
+        .unwrap();
+
+    match timeout(Duration::from_secs(1), stream.recv()).await.unwrap() {
+        Some(TaskStreamFrame::Event(event)) => {
+            assert_eq!(event.event_type, TaskEventType::ProcessStdout);
+            assert_eq!(event.payload["text"], "hello");
+        }
+        other => panic!("unexpected frame: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn terminal_task_event_stream_replays_then_closes() {
+    let temp_dir = TempDir::new();
+    let state = fixture_state(temp_dir.path(), false);
+    let grant = create_fixture_grant(temp_dir.path(), "product", "agent", false, false);
+    let task = state
+        .task_store()
+        .create(create_task_input("product", "agent", &grant.id))
+        .unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::WaitingDirectoryLock, None)
+        .unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::Preparing, None)
+        .unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::Running, None)
+        .unwrap();
+    state.task_store().transition(&task.id, TaskStatus::Completed, None).unwrap();
+    let service = state.task_event_service();
+    let mut stream = service.stream(&task.id, 0).unwrap();
+
+    let mut seen = Vec::new();
+    while let Some(frame) = timeout(Duration::from_secs(1), stream.recv()).await.unwrap() {
+        match frame {
+            TaskStreamFrame::Event(event) => seen.push(event.event_type),
+            TaskStreamFrame::Heartbeat => panic!("terminal stream should not heartbeat"),
+        }
+    }
+
+    assert_eq!(
+        seen,
+        vec![
+            TaskEventType::Queued,
+            TaskEventType::WaitingDirectoryLock,
+            TaskEventType::Preparing,
+            TaskEventType::Running,
+            TaskEventType::Completed
+        ]
+    );
+    assert!(seen.last().copied().is_some_and(is_terminal_event_type));
+}
+
+#[test]
+fn task_store_persists_permission_requests_and_idempotent_resolution() {
+    let temp_dir = TempDir::new();
+    let state = fixture_state(temp_dir.path(), false);
+    let grant = create_fixture_grant(temp_dir.path(), "product", "agent", false, false);
+    let task = state
+        .task_store()
+        .create(create_task_input("product", "agent", &grant.id))
+        .unwrap();
+    let requested = state
+        .task_store()
+        .record_permission_request(
+            &task.id,
+            PermissionRequestEvent {
+                request_id: "perm_1".to_owned(),
+                provider_id: "acp-example".to_owned(),
+                permission_kind: "shell_command".to_owned(),
+                summary: "run git push".to_owned(),
+                details: Some(json!({"command":["git","push"]})),
+                options: vec![PermissionDecision::Approve, PermissionDecision::Deny],
+                expires_at: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        requested.event_type,
+        TaskEventType::ProviderPermissionRequested
+    );
+
+    let reopened = temp_task_store(temp_dir.path());
+    let pending = reopened
+        .get_permission_request(&task.id, "perm_1")
+        .unwrap();
+    assert_eq!(pending.status, PermissionRequestStatus::Pending);
+
+    let resolution = reopened
+        .resolve_permission_request(
+            &task.id,
+            "perm_1",
+            PermissionDecision::Approve,
+            Some("approved".to_owned()),
+        )
+        .unwrap();
+    assert_eq!(resolution.status, PermissionRequestStatus::Approved);
+    assert!(!resolution.duplicated);
+    assert_eq!(
+        resolution.event.event_type,
+        TaskEventType::ProviderPermissionDecided
+    );
+
+    let duplicate = reopened
+        .resolve_permission_request(
+            &task.id,
+            "perm_1",
+            PermissionDecision::Approve,
+            Some("approved".to_owned()),
+        )
+        .unwrap();
+    assert!(duplicate.duplicated);
+
+    let conflict = reopened.resolve_permission_request(
+        &task.id,
+        "perm_1",
+        PermissionDecision::Deny,
+        None,
+    );
+    assert!(matches!(
+        conflict.unwrap_err(),
+        crate::store::tasks::TaskStoreError::PermissionRequestAlreadyResolved
+    ));
 }
 
 #[test]
@@ -578,6 +766,195 @@ async fn task_api_returns_stable_errors_for_invalid_policy() {
     assert_error(error, StatusCode::NOT_FOUND, "directory_not_found").await;
 }
 
+#[tokio::test]
+async fn task_events_api_validates_cursor_and_prefers_query_cursor() {
+    let temp_dir = TempDir::new();
+    let state = fixture_state(temp_dir.path(), false);
+    let grant = create_fixture_grant(temp_dir.path(), "product", "agent", false, false);
+    let task = state
+        .task_store()
+        .create(create_task_input("product", "agent", &grant.id))
+        .unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::WaitingDirectoryLock, None)
+        .unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::Preparing, None)
+        .unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::Running, None)
+        .unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::Completed, None)
+        .unwrap();
+
+    let error = task_events(
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+        Query(TaskEventsQuery {
+            cursor: Some("bad".to_owned()),
+        }),
+        HeaderMap::new(),
+    )
+    .await
+    .unwrap_err();
+    assert_error(error, StatusCode::BAD_REQUEST, "invalid_event_cursor").await;
+
+    let mut headers = HeaderMap::new();
+    headers.insert("last-event-id", HeaderValue::from_static("3"));
+    let response = task_events(
+        State(state),
+        AxumPath(task.id),
+        Query(TaskEventsQuery {
+            cursor: Some("1".to_owned()),
+        }),
+        headers,
+    )
+    .await
+    .unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+
+    assert!(text.contains("id: 2"));
+    assert!(text.contains("id: 3"));
+    assert!(text.contains("id: 4"));
+    assert!(text.contains("id: 5"));
+    assert!(!text.contains("id: 1"));
+}
+
+#[tokio::test]
+async fn task_event_post_resolves_permission_request_and_reports_stable_errors() {
+    let temp_dir = TempDir::new();
+    let state = fixture_state(temp_dir.path(), false);
+    let grant = create_fixture_grant(temp_dir.path(), "product", "agent", false, false);
+    let task = state
+        .task_store()
+        .create(create_task_input("product", "agent", &grant.id))
+        .unwrap();
+    state
+        .task_store()
+        .record_permission_request(
+            &task.id,
+            PermissionRequestEvent {
+                request_id: "perm_1".to_owned(),
+                provider_id: "acp-example".to_owned(),
+                permission_kind: "shell_command".to_owned(),
+                summary: "run git push".to_owned(),
+                details: None,
+                options: vec![PermissionDecision::Approve, PermissionDecision::Deny],
+                expires_at: None,
+            },
+        )
+        .unwrap();
+    let waiter = state.task_event_bus().register_waiter(&task.id, "perm_1");
+
+    let response = task_post_event(
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+        Json(TaskEventRequest {
+            event_type: "provider.permission_response".to_owned(),
+            request_id: "perm_1".to_owned(),
+            decision: "approve".to_owned(),
+            reason: Some("approved".to_owned()),
+        }),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(response.status, "resolved");
+    assert_eq!(response.decision, PermissionDecision::Approve);
+    let decision = timeout(Duration::from_secs(1), waiter).await.unwrap().unwrap();
+    assert_eq!(decision.decision, PermissionDecision::Approve);
+
+    let duplicate = task_post_event(
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+        Json(TaskEventRequest {
+            event_type: "provider.permission_response".to_owned(),
+            request_id: "perm_1".to_owned(),
+            decision: "approve".to_owned(),
+            reason: None,
+        }),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(duplicate.status, "resolved");
+
+    let conflict = task_post_event(
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+        Json(TaskEventRequest {
+            event_type: "provider.permission_response".to_owned(),
+            request_id: "perm_1".to_owned(),
+            decision: "deny".to_owned(),
+            reason: None,
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert_error(
+        conflict,
+        StatusCode::CONFLICT,
+        "permission_request_already_resolved",
+    )
+    .await;
+
+    let missing = task_post_event(
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+        Json(TaskEventRequest {
+            event_type: "provider.permission_response".to_owned(),
+            request_id: "missing".to_owned(),
+            decision: "approve".to_owned(),
+            reason: None,
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert_error(missing, StatusCode::NOT_FOUND, "permission_request_not_found").await;
+
+    let invalid = task_post_event(
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+        Json(TaskEventRequest {
+            event_type: "process.stdout".to_owned(),
+            request_id: "perm_2".to_owned(),
+            decision: "approve".to_owned(),
+            reason: None,
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert_error(invalid, StatusCode::BAD_REQUEST, "invalid_event_request").await;
+
+    let invalid_decision = task_post_event(
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+        Json(
+            serde_json::from_value(json!({
+                "event_type": "provider.permission_response",
+                "request_id": "perm_2",
+                "decision": "maybe",
+                "reason": null
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert_error(
+        invalid_decision,
+        StatusCode::BAD_REQUEST,
+        "invalid_permission_decision",
+    )
+    .await;
+}
+
 async fn assert_error(error: crate::api::tasks::ApiError, status: StatusCode, code: &str) {
     let response = error.into_response();
     assert_eq!(response.status(), status);
@@ -587,6 +964,14 @@ async fn assert_error(error: crate::api::tasks::ApiError, status: StatusCode, co
 }
 
 fn fixture_state(root: &Path, allow_direct: bool) -> AppState {
+    fixture_state_with_scheduler_config(root, allow_direct, SchedulerConfig::default())
+}
+
+fn fixture_state_with_scheduler_config(
+    root: &Path,
+    allow_direct: bool,
+    scheduler_config: SchedulerConfig,
+) -> AppState {
     let profile_store = temp_profile_store(root);
     profile_store
         .create(CreateAgentProfile {
@@ -615,7 +1000,7 @@ fn fixture_state(root: &Path, allow_direct: bool) -> AppState {
         temp_directory_store(root),
         profile_store,
         temp_task_store(root),
-        SchedulerConfig::default(),
+        scheduler_config,
     )
 }
 

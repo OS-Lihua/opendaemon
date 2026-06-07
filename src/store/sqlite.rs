@@ -96,6 +96,22 @@ fn initialize_schema(connection: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS task_events_task_idx
         ON task_events(task_id, sequence);
 
+        CREATE TABLE IF NOT EXISTS task_permission_requests (
+            request_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            provider_id TEXT NOT NULL,
+            permission_kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            request_payload_json TEXT NOT NULL,
+            response_payload_json TEXT,
+            requested_at TEXT NOT NULL,
+            responded_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS task_permission_requests_task_idx
+        ON task_permission_requests(task_id, status);
+
         CREATE TABLE IF NOT EXISTS directory_locks (
             directory_id TEXT NOT NULL,
             task_id TEXT NOT NULL,

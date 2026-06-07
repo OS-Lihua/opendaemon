@@ -10,6 +10,7 @@ pub const DEFAULT_DAEMON_HOST: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 pub const DEFAULT_DAEMON_PORT: u16 = 19514;
 pub const DEFAULT_RUNTIME_DETECTION_TIMEOUT: Duration = Duration::from_secs(2);
 pub const DEFAULT_MAX_CONCURRENT_TASKS: usize = 1;
+pub const DEFAULT_TASK_EVENT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const APP_QUALIFIER: &str = "dev";
 const APP_ORGANIZATION: &str = "OpenDaemon";
 const APP_NAME: &str = "OpenDaemon";
@@ -115,6 +116,7 @@ pub struct StoreConfig {
 pub struct SchedulerConfig {
     pub max_concurrent_tasks: usize,
     pub allow_agent_custom_env: bool,
+    pub task_event_heartbeat_interval: Duration,
 }
 
 impl Default for SchedulerConfig {
@@ -122,6 +124,7 @@ impl Default for SchedulerConfig {
         Self {
             max_concurrent_tasks: DEFAULT_MAX_CONCURRENT_TASKS,
             allow_agent_custom_env: false,
+            task_event_heartbeat_interval: DEFAULT_TASK_EVENT_HEARTBEAT_INTERVAL,
         }
     }
 }

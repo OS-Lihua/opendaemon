@@ -1,17 +1,24 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response, Sse},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::Duration;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
     scheduler::service::{SchedulerService, TaskValidationError},
     security::directory::{DirectoryCapability, WorkspaceMode},
     store::tasks::TaskFilters,
-    task::model::{CreateTask, Task, TaskStatus},
+    task::{
+        event::{PermissionDecision, TaskEventView},
+        model::{CreateTask, Task, TaskStatus},
+        permission::PermissionResponseRequest,
+        service::{TaskEventServiceError, TaskStreamFrame},
+    },
 };
 
 use super::{AppState, ErrorBody, ErrorResponse};
@@ -51,6 +58,27 @@ pub struct CreateTaskRequest {
     pub model: Option<String>,
     pub permission_mode: Option<String>,
     pub timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TaskEventsQuery {
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TaskEventRequest {
+    pub event_type: String,
+    pub request_id: String,
+    pub decision: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct TaskPermissionResponse {
+    pub task_id: String,
+    pub request_id: String,
+    pub status: String,
+    pub decision: PermissionDecision,
 }
 
 pub async fn list(
@@ -95,6 +123,71 @@ pub async fn cancel(
     Ok(Json(SingleTaskResponse { task }))
 }
 
+pub async fn events(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+    Query(query): Query<TaskEventsQuery>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let last_event_id = headers
+        .get("last-event-id")
+        .and_then(|value| value.to_str().ok());
+    let service = state.task_event_service();
+    let cursor = crate::task::service::TaskEventService::parse_cursor(
+        query.cursor.as_deref(),
+        last_event_id,
+    )?;
+    let receiver = service.stream(&task_id, cursor)?;
+    let stream = ReceiverStream::new(receiver).map(|frame| match frame {
+        TaskStreamFrame::Event(event) => Ok::<_, std::convert::Infallible>(
+            axum::response::sse::Event::default()
+                .id(event.sequence.to_string())
+                .event(event.event_type.as_str())
+                .data(serde_json::to_string(&TaskEventView::from(event)).unwrap()),
+        ),
+        TaskStreamFrame::Heartbeat => Ok::<_, std::convert::Infallible>(
+            axum::response::sse::Event::default().comment("keep-alive"),
+        ),
+    });
+
+    Ok(Sse::new(stream)
+        .keep_alive(
+            axum::response::sse::KeepAlive::new().interval(Duration::from_secs(365 * 24 * 60 * 60)),
+        )
+        .into_response())
+}
+
+pub async fn post_event(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+    Json(request): Json<TaskEventRequest>,
+) -> Result<Json<TaskPermissionResponse>, ApiError> {
+    if request.event_type != "provider.permission_response" {
+        return Err(ApiError::TaskEvents(
+            TaskEventServiceError::InvalidEventRequest,
+        ));
+    }
+    let decision = match request.decision.as_str() {
+        "approve" => PermissionDecision::Approve,
+        "deny" => PermissionDecision::Deny,
+        _ => return Err(ApiError::TaskEvents(TaskEventServiceError::InvalidPermissionDecision)),
+    };
+    let resolution = state.task_event_service().resolve_permission_response(
+        &task_id,
+        PermissionResponseRequest {
+            request_id: request.request_id,
+            decision,
+            reason: request.reason,
+        },
+    )?;
+    Ok(Json(TaskPermissionResponse {
+        task_id,
+        request_id: resolution.request_id,
+        status: "resolved".to_owned(),
+        decision: resolution.decision,
+    }))
+}
+
 fn scheduler_service(state: &AppState) -> SchedulerService {
     SchedulerService::new(
         state.task_store().clone(),
@@ -126,6 +219,7 @@ impl From<CreateTaskRequest> for CreateTask {
 #[derive(Debug)]
 pub enum ApiError {
     Task(TaskValidationError),
+    TaskEvents(TaskEventServiceError),
 }
 
 impl From<TaskValidationError> for ApiError {
@@ -140,10 +234,17 @@ impl From<crate::store::tasks::TaskStoreError> for ApiError {
     }
 }
 
+impl From<TaskEventServiceError> for ApiError {
+    fn from(error: TaskEventServiceError) -> Self {
+        Self::TaskEvents(error)
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
             Self::Task(error) => task_error_response(error),
+            Self::TaskEvents(error) => task_event_error_response(error),
         };
 
         (
@@ -153,6 +254,58 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response()
+    }
+}
+
+fn task_event_error_response(error: TaskEventServiceError) -> (StatusCode, &'static str, String) {
+    match error {
+        TaskEventServiceError::InvalidCursor => (
+            StatusCode::BAD_REQUEST,
+            "invalid_event_cursor",
+            "invalid event cursor".to_owned(),
+        ),
+        TaskEventServiceError::InvalidEventRequest => (
+            StatusCode::BAD_REQUEST,
+            "invalid_event_request",
+            "invalid event request".to_owned(),
+        ),
+        TaskEventServiceError::InvalidPermissionDecision => (
+            StatusCode::BAD_REQUEST,
+            "invalid_permission_decision",
+            "invalid permission decision".to_owned(),
+        ),
+        TaskEventServiceError::PermissionResponseNotSupported => (
+            StatusCode::CONFLICT,
+            "permission_response_not_supported",
+            "permission response not supported".to_owned(),
+        ),
+        TaskEventServiceError::StorePayload(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            error.to_string(),
+        ),
+        TaskEventServiceError::Task(
+            crate::store::tasks::TaskStoreError::PermissionRequestNotFound,
+        ) => (
+            StatusCode::NOT_FOUND,
+            "permission_request_not_found",
+            "permission request not found".to_owned(),
+        ),
+        TaskEventServiceError::Task(
+            crate::store::tasks::TaskStoreError::PermissionRequestNotPending,
+        ) => (
+            StatusCode::CONFLICT,
+            "permission_request_not_pending",
+            "permission request not pending".to_owned(),
+        ),
+        TaskEventServiceError::Task(
+            crate::store::tasks::TaskStoreError::PermissionRequestAlreadyResolved,
+        ) => (
+            StatusCode::CONFLICT,
+            "permission_request_already_resolved",
+            "permission request already resolved".to_owned(),
+        ),
+        TaskEventServiceError::Task(error) => task_error_response(error.into()),
     }
 }
 

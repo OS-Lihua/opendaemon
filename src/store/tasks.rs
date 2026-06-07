@@ -9,9 +9,14 @@ use crate::{
     scheduler::locks::{DirectoryLock, LockMode, LockRequest},
     security::directory::WorkspaceMode,
     task::{
-        event::{TaskEvent, TaskEventType},
+        event::{
+            PermissionDecision, PermissionDecisionEvent, PermissionRequestEvent, TaskEvent,
+            TaskEventType,
+        },
         model::{CreateTask, Task, TaskModelError, TaskStatus},
+        permission::{PermissionRequestRecord, PermissionRequestStatus, PermissionResolution},
         result::TaskResult,
+        service::SharedTaskEventBus,
         state::{TaskStateError, TaskTransition, validate_transition},
     },
 };
@@ -21,6 +26,7 @@ use super::sqlite;
 #[derive(Debug, Clone)]
 pub struct TaskStore {
     sqlite_path: Arc<PathBuf>,
+    event_bus: Option<SharedTaskEventBus>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -34,6 +40,9 @@ pub struct TaskFilters {
 #[derive(Debug)]
 pub enum TaskStoreError {
     NotFound,
+    PermissionRequestNotFound,
+    PermissionRequestNotPending,
+    PermissionRequestAlreadyResolved,
     Model(TaskModelError),
     State(TaskStateError),
     Store(anyhow::Error),
@@ -50,7 +59,14 @@ impl TaskStore {
     pub fn configured(config: StoreConfig) -> Self {
         Self {
             sqlite_path: Arc::new(config.sqlite_path),
+            event_bus: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_event_bus(mut self, event_bus: SharedTaskEventBus) -> Self {
+        self.event_bus = Some(event_bus);
+        self
     }
 
     pub fn open(config: StoreConfig) -> Result<Self, TaskStoreError> {
@@ -129,7 +145,7 @@ impl TaskStore {
             &now,
         )?;
         transaction.commit().map_err(store_error)?;
-
+        self.publish_if_configured(self.event_by_sequence(&self.connection()?, &id, 1)?);
         self.get(&id)
     }
 
@@ -212,6 +228,7 @@ impl TaskStore {
             release_locks_tx(&transaction, id, &now)?;
         }
         transaction.commit().map_err(store_error)?;
+        self.publish_if_configured(self.event_by_sequence(&self.connection()?, id, sequence)?);
         self.get(id)
     }
 
@@ -278,25 +295,181 @@ impl TaskStore {
         let sequence = self.next_sequence(task_id)?;
         let connection = self.connection()?;
         insert_event_tx(&connection, task_id, sequence, event_type, payload, &now)?;
-        Ok(self
-            .list_events(task_id)?
-            .into_iter()
-            .find(|event| event.sequence == sequence)
-            .expect("inserted task event must be readable"))
+        let event = self.event_by_sequence(&connection, task_id, sequence)?;
+        self.publish_if_configured(event.clone());
+        Ok(event)
     }
 
     pub fn list_events(&self, task_id: &str) -> Result<Vec<TaskEvent>, TaskStoreError> {
+        self.list_events_after(task_id, 0)
+    }
+
+    pub fn list_events_after(
+        &self,
+        task_id: &str,
+        cursor: i64,
+    ) -> Result<Vec<TaskEvent>, TaskStoreError> {
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare("SELECT * FROM task_events WHERE task_id = ?1 ORDER BY sequence ASC")
+            .prepare(
+                "SELECT * FROM task_events
+                 WHERE task_id = ?1 AND sequence > ?2
+                 ORDER BY sequence ASC",
+            )
             .map_err(store_error)?;
         statement
-            .query_map(params![task_id], row_to_event)
+            .query_map(params![task_id, cursor], row_to_event)
             .map_err(store_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(store_error)?
             .into_iter()
             .collect()
+    }
+
+    pub fn record_permission_request(
+        &self,
+        task_id: &str,
+        request: PermissionRequestEvent,
+    ) -> Result<TaskEvent, TaskStoreError> {
+        self.get(task_id)?;
+        let now = now_rfc3339()?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(store_error)?;
+        let sequence = next_sequence_tx(&transaction, task_id)?;
+        let payload = serde_json::to_value(&request).map_err(store_error)?;
+        insert_event_tx(
+            &transaction,
+            task_id,
+            sequence,
+            TaskEventType::ProviderPermissionRequested,
+            payload,
+            &now,
+        )?;
+        transaction
+            .execute(
+                "INSERT INTO task_permission_requests (
+                    request_id,
+                    task_id,
+                    sequence,
+                    provider_id,
+                    permission_kind,
+                    status,
+                    request_payload_json,
+                    response_payload_json,
+                    requested_at,
+                    responded_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, NULL)",
+                params![
+                    request.request_id,
+                    task_id,
+                    sequence,
+                    request.provider_id,
+                    request.permission_kind,
+                    serialize_json(&PermissionRequestStatus::Pending)?,
+                    serialize_json(&request)?,
+                    now,
+                ],
+            )
+            .map_err(store_error)?;
+        transaction.commit().map_err(store_error)?;
+        let connection = self.connection()?;
+        let event = self.event_by_sequence(&connection, task_id, sequence)?;
+        self.publish_if_configured(event.clone());
+        Ok(event)
+    }
+
+    pub fn get_permission_request(
+        &self,
+        task_id: &str,
+        request_id: &str,
+    ) -> Result<PermissionRequestRecord, TaskStoreError> {
+        self.get(task_id)?;
+        let connection = self.connection()?;
+        query_permission_request(&connection, task_id, request_id)?
+            .ok_or(TaskStoreError::PermissionRequestNotFound)
+    }
+
+    pub fn resolve_permission_request(
+        &self,
+        task_id: &str,
+        request_id: &str,
+        decision: PermissionDecision,
+        reason: Option<String>,
+    ) -> Result<PermissionResolution, TaskStoreError> {
+        self.get(task_id)?;
+        let now = now_rfc3339()?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(store_error)?;
+        let request = query_permission_request(&transaction, task_id, request_id)?
+            .ok_or(TaskStoreError::PermissionRequestNotFound)?;
+
+        match request.status {
+            PermissionRequestStatus::Pending => {}
+            PermissionRequestStatus::Approved | PermissionRequestStatus::Denied => {
+                let response = request.response.clone().ok_or_else(|| {
+                    store_error(anyhow::anyhow!("resolved request missing response"))
+                })?;
+                if response.decision == decision {
+                    let event = query_permission_decision_event(&transaction, task_id, request_id)?
+                        .ok_or_else(|| {
+                            store_error(anyhow::anyhow!("resolved request missing decision event"))
+                        })?;
+                    return Ok(PermissionResolution {
+                        task_id: task_id.to_owned(),
+                        request_id: request_id.to_owned(),
+                        status: PermissionRequestStatus::from_decision(decision),
+                        decision,
+                        event,
+                        duplicated: true,
+                    });
+                }
+                return Err(TaskStoreError::PermissionRequestAlreadyResolved);
+            }
+        }
+
+        let response = PermissionDecisionEvent {
+            request_id: request_id.to_owned(),
+            decision,
+            reason,
+        };
+        let sequence = next_sequence_tx(&transaction, task_id)?;
+        insert_event_tx(
+            &transaction,
+            task_id,
+            sequence,
+            TaskEventType::ProviderPermissionDecided,
+            serde_json::to_value(&response).map_err(store_error)?,
+            &now,
+        )?;
+        let status = PermissionRequestStatus::from_decision(decision);
+        transaction
+            .execute(
+                "UPDATE task_permission_requests
+                 SET status = ?1,
+                     response_payload_json = ?2,
+                     responded_at = ?3
+                 WHERE request_id = ?4 AND task_id = ?5",
+                params![
+                    serialize_json(&status)?,
+                    serialize_json(&response)?,
+                    now,
+                    request_id,
+                    task_id,
+                ],
+            )
+            .map_err(store_error)?;
+        transaction.commit().map_err(store_error)?;
+        let connection = self.connection()?;
+        let event = self.event_by_sequence(&connection, task_id, sequence)?;
+        self.publish_if_configured(event.clone());
+        Ok(PermissionResolution {
+            task_id: task_id.to_owned(),
+            request_id: request_id.to_owned(),
+            status,
+            decision,
+            event,
+            duplicated: false,
+        })
     }
 
     pub fn acquire_lock(&self, request: &LockRequest) -> Result<bool, TaskStoreError> {
@@ -378,6 +551,27 @@ impl TaskStore {
     fn connection(&self) -> Result<Connection, TaskStoreError> {
         sqlite::open_connection(&self.sqlite_path).map_err(store_error)
     }
+
+    fn publish_if_configured(&self, event: TaskEvent) {
+        if let Some(event_bus) = &self.event_bus {
+            event_bus.publish(event);
+        }
+    }
+
+    fn event_by_sequence(
+        &self,
+        connection: &Connection,
+        task_id: &str,
+        sequence: i64,
+    ) -> Result<TaskEvent, TaskStoreError> {
+        connection
+            .query_row(
+                "SELECT * FROM task_events WHERE task_id = ?1 AND sequence = ?2",
+                params![task_id, sequence],
+                row_to_event,
+            )
+            .map_err(store_error)?
+    }
 }
 
 impl From<StoreConfig> for TaskStore {
@@ -392,6 +586,47 @@ fn query_one(connection: &Connection, id: &str) -> Result<Option<Task>, TaskStor
             "SELECT * FROM tasks WHERE id = ?1",
             params![id],
             row_to_task,
+        )
+        .optional()
+        .map_err(store_error)?
+        .transpose()
+}
+
+fn query_permission_request(
+    connection: &Connection,
+    task_id: &str,
+    request_id: &str,
+) -> Result<Option<PermissionRequestRecord>, TaskStoreError> {
+    connection
+        .query_row(
+            "SELECT * FROM task_permission_requests WHERE task_id = ?1 AND request_id = ?2",
+            params![task_id, request_id],
+            row_to_permission_request,
+        )
+        .optional()
+        .map_err(store_error)?
+        .transpose()
+}
+
+fn query_permission_decision_event(
+    connection: &Connection,
+    task_id: &str,
+    request_id: &str,
+) -> Result<Option<TaskEvent>, TaskStoreError> {
+    connection
+        .query_row(
+            "SELECT * FROM task_events
+             WHERE task_id = ?1
+               AND event_type = ?2
+               AND json_extract(payload_json, '$.request_id') = ?3
+             ORDER BY sequence ASC
+             LIMIT 1",
+            params![
+                task_id,
+                serialize_json(&TaskEventType::ProviderPermissionDecided)?,
+                request_id
+            ],
+            row_to_event,
         )
         .optional()
         .map_err(store_error)?
@@ -461,6 +696,28 @@ fn row_to_lock(row: &Row<'_>) -> Result<Result<DirectoryLock, TaskStoreError>, r
     })())
 }
 
+fn row_to_permission_request(
+    row: &Row<'_>,
+) -> Result<Result<PermissionRequestRecord, TaskStoreError>, rusqlite::Error> {
+    let status_json: String = row.get("status")?;
+    let request_payload_json: String = row.get("request_payload_json")?;
+    let response_payload_json: Option<String> = row.get("response_payload_json")?;
+    Ok((|| {
+        Ok(PermissionRequestRecord {
+            request_id: row.get("request_id")?,
+            task_id: row.get("task_id")?,
+            sequence: row.get("sequence")?,
+            provider_id: row.get("provider_id")?,
+            permission_kind: row.get("permission_kind")?,
+            status: deserialize_json(&status_json)?,
+            request: deserialize_json(&request_payload_json)?,
+            response: deserialize_optional_json(response_payload_json)?,
+            requested_at: row.get("requested_at")?,
+            responded_at: row.get("responded_at")?,
+        })
+    })())
+}
+
 fn insert_event_tx(
     connection: &Connection,
     task_id: &str,
@@ -507,6 +764,16 @@ fn release_locks_tx(
         )
         .map_err(store_error)?;
     Ok(())
+}
+
+fn next_sequence_tx(connection: &Connection, task_id: &str) -> Result<i64, TaskStoreError> {
+    connection
+        .query_row(
+            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM task_events WHERE task_id = ?1",
+            params![task_id],
+            |row| row.get(0),
+        )
+        .map_err(store_error)
 }
 
 fn event_type_for_status(status: TaskStatus) -> TaskEventType {

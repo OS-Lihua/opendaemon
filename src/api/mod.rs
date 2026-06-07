@@ -28,6 +28,7 @@ use crate::{
     store::{
         agent_profiles::AgentProfileStore, directory_grants::DirectoryGrantStore, tasks::TaskStore,
     },
+    task::service::{SharedTaskEventBus, TaskEventBus, TaskEventService},
 };
 
 #[cfg(test)]
@@ -48,7 +49,8 @@ pub(crate) use providers::{
 pub(crate) use runtimes::{detect as runtime_detect, list as runtime_list};
 #[cfg(test)]
 pub(crate) use tasks::{
-    cancel as task_cancel, create as task_create, get as task_get, list as task_list,
+    cancel as task_cancel, create as task_create, events as task_events, get as task_get,
+    list as task_list, post_event as task_post_event,
 };
 
 #[derive(Debug, Clone)]
@@ -59,6 +61,7 @@ pub struct AppState {
     directory_grant_store: DirectoryGrantStore,
     agent_profile_store: AgentProfileStore,
     task_store: TaskStore,
+    task_event_bus: SharedTaskEventBus,
     scheduler_config: SchedulerConfig,
 }
 
@@ -124,13 +127,15 @@ impl AppState {
         task_store: TaskStore,
         scheduler_config: SchedulerConfig,
     ) -> Self {
+        let task_event_bus = std::sync::Arc::new(TaskEventBus::default());
         Self {
             providers_dir,
             runtime_store,
             runtime_detection_config,
             directory_grant_store,
             agent_profile_store,
-            task_store,
+            task_store: task_store.with_event_bus(task_event_bus.clone()),
+            task_event_bus,
             scheduler_config,
         }
     }
@@ -162,6 +167,20 @@ impl AppState {
     #[must_use]
     pub fn task_store(&self) -> &TaskStore {
         &self.task_store
+    }
+
+    #[must_use]
+    pub fn task_event_bus(&self) -> &SharedTaskEventBus {
+        &self.task_event_bus
+    }
+
+    #[must_use]
+    pub fn task_event_service(&self) -> TaskEventService {
+        TaskEventService::new(
+            self.task_store.clone(),
+            self.task_event_bus.clone(),
+            self.scheduler_config.task_event_heartbeat_interval,
+        )
     }
 
     #[must_use]
@@ -197,6 +216,10 @@ pub fn router_with_state(state: AppState) -> Router {
         .route("/v1/runtimes/detect", post(runtimes::detect))
         .route("/v1/tasks", get(tasks::list).post(tasks::create))
         .route("/v1/tasks/{task_id}", get(tasks::get))
+        .route(
+            "/v1/tasks/{task_id}/events",
+            get(tasks::events).post(tasks::post_event),
+        )
         .route("/v1/tasks/{task_id}/cancel", post(tasks::cancel))
         .route("/v1/agents", get(agents::list).post(agents::create))
         .route(
