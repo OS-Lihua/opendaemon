@@ -74,6 +74,11 @@ impl TaskStore {
         Ok(Self::configured(config))
     }
 
+    #[must_use]
+    pub fn event_bus(&self) -> Option<SharedTaskEventBus> {
+        self.event_bus.clone()
+    }
+
     pub fn create(&self, input: CreateTask) -> Result<Task, TaskStoreError> {
         input.validate().map_err(TaskStoreError::Model)?;
         let now = now_rfc3339()?;

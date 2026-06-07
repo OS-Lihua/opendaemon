@@ -12,10 +12,10 @@ use crate::{
     registry::ProviderManifest,
     runtime::{
         detect::detect_provider,
-        model::{RuntimeStatus, override_env_var_name, runtime_id},
+        model::{RuntimeKind, RuntimeStatus, override_env_var_name, runtime_id},
         store::RuntimeStore,
     },
-    tests::{TempDir, valid_manifest_json},
+    tests::{TempDir, valid_acp_manifest_json, valid_manifest_json},
 };
 
 #[test]
@@ -50,6 +50,11 @@ async fn runtime_store_returns_not_detected_until_updated_and_sorts_by_provider_
     assert!(initial.iter().all(|runtime| {
         runtime.status == RuntimeStatus::NotDetected && runtime.detected_at.is_none()
     }));
+    assert!(
+        initial
+            .iter()
+            .all(|runtime| runtime.kind == RuntimeKind::LocalCli)
+    );
 
     store
         .save(crate::runtime::model::RuntimeView::available(
@@ -68,6 +73,22 @@ async fn runtime_store_returns_not_detected_until_updated_and_sorts_by_provider_
     assert_eq!(zeta.status, RuntimeStatus::Available);
     assert_eq!(zeta.version.as_deref(), Some("1.0.0"));
     assert!(zeta.detected_at.is_some());
+}
+
+#[tokio::test]
+async fn acp_runtime_store_and_detection_return_acp_runtime_without_spawning() {
+    let store = RuntimeStore::default();
+    let manifest: ProviderManifest = serde_json::from_value(valid_acp_manifest_json()).unwrap();
+
+    let listed = store
+        .list_for_providers(std::slice::from_ref(&manifest))
+        .await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].kind, RuntimeKind::LocalAcp);
+    assert_eq!(listed[0].status, RuntimeStatus::NotDetected);
+
+    let detected = detect_provider(&manifest, &RuntimeDetectionConfig::default()).await;
+    assert_eq!(detected.kind, RuntimeKind::LocalAcp);
 }
 
 #[tokio::test]

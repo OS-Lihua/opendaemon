@@ -7,6 +7,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeKind {
     LocalCli,
+    LocalAcp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -49,11 +50,16 @@ pub struct RuntimeView {
 impl RuntimeView {
     #[must_use]
     pub fn not_detected(provider_id: impl Into<String>) -> Self {
+        Self::not_detected_with_kind(provider_id, RuntimeKind::LocalCli)
+    }
+
+    #[must_use]
+    pub fn not_detected_with_kind(provider_id: impl Into<String>, kind: RuntimeKind) -> Self {
         let provider_id = provider_id.into();
         Self {
-            id: runtime_id(&provider_id),
+            id: runtime_id_for_kind(&provider_id, kind),
             provider_id,
-            kind: RuntimeKind::LocalCli,
+            kind,
             status: RuntimeStatus::NotDetected,
             executable: None,
             version: None,
@@ -68,11 +74,21 @@ impl RuntimeView {
         executable: PathBuf,
         version: Option<String>,
     ) -> Self {
+        Self::available_with_kind(provider_id, RuntimeKind::LocalCli, executable, version)
+    }
+
+    #[must_use]
+    pub fn available_with_kind(
+        provider_id: impl Into<String>,
+        kind: RuntimeKind,
+        executable: PathBuf,
+        version: Option<String>,
+    ) -> Self {
         let provider_id = provider_id.into();
         Self {
-            id: runtime_id(&provider_id),
+            id: runtime_id_for_kind(&provider_id, kind),
             provider_id,
-            kind: RuntimeKind::LocalCli,
+            kind,
             status: RuntimeStatus::Available,
             executable: Some(executable),
             version,
@@ -83,11 +99,20 @@ impl RuntimeView {
 
     #[must_use]
     pub fn unavailable(provider_id: impl Into<String>, error: RuntimeError) -> Self {
+        Self::unavailable_with_kind(provider_id, RuntimeKind::LocalCli, error)
+    }
+
+    #[must_use]
+    pub fn unavailable_with_kind(
+        provider_id: impl Into<String>,
+        kind: RuntimeKind,
+        error: RuntimeError,
+    ) -> Self {
         let provider_id = provider_id.into();
         Self {
-            id: runtime_id(&provider_id),
+            id: runtime_id_for_kind(&provider_id, kind),
             provider_id,
-            kind: RuntimeKind::LocalCli,
+            kind,
             status: RuntimeStatus::Unavailable,
             executable: None,
             version: None,
@@ -102,11 +127,21 @@ impl RuntimeView {
         executable: Option<PathBuf>,
         error: RuntimeError,
     ) -> Self {
+        Self::error_with_kind(provider_id, RuntimeKind::LocalCli, executable, error)
+    }
+
+    #[must_use]
+    pub fn error_with_kind(
+        provider_id: impl Into<String>,
+        kind: RuntimeKind,
+        executable: Option<PathBuf>,
+        error: RuntimeError,
+    ) -> Self {
         let provider_id = provider_id.into();
         Self {
-            id: runtime_id(&provider_id),
+            id: runtime_id_for_kind(&provider_id, kind),
             provider_id,
-            kind: RuntimeKind::LocalCli,
+            kind,
             status: RuntimeStatus::Error,
             executable,
             version: None,
@@ -122,6 +157,22 @@ pub fn runtime_id(provider_id: &str) -> String {
         "rt_{}_local_cli",
         normalize_provider_id(provider_id, LetterCase::Lower)
     )
+}
+
+#[must_use]
+pub fn acp_runtime_id(provider_id: &str) -> String {
+    format!(
+        "rt_{}_local_acp",
+        normalize_provider_id(provider_id, LetterCase::Lower)
+    )
+}
+
+#[must_use]
+pub fn runtime_id_for_kind(provider_id: &str, kind: RuntimeKind) -> String {
+    match kind {
+        RuntimeKind::LocalCli => runtime_id(provider_id),
+        RuntimeKind::LocalAcp => acp_runtime_id(provider_id),
+    }
 }
 
 #[must_use]

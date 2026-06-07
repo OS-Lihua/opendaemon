@@ -157,6 +157,63 @@ fn validate_manifest_fields(manifest: &ProviderManifest, errors: &mut Vec<String
             "provider {provider}: remote_execution requires security.sends_code_to_vendor"
         ));
     }
+
+    validate_acp_fields(manifest, errors);
+}
+
+fn validate_acp_fields(manifest: &ProviderManifest, errors: &mut Vec<String>) {
+    let provider = manifest.id.as_str();
+
+    match manifest.integration_type {
+        super::manifest::IntegrationType::Acp => {
+            let Some(acp) = &manifest.acp else {
+                errors.push(format!(
+                    "provider {provider}: acp section is required for acp integration"
+                ));
+                return;
+            };
+
+            let has_command = acp
+                .command
+                .as_ref()
+                .is_some_and(|command| !command.is_empty());
+            let has_endpoint = acp
+                .endpoint
+                .as_ref()
+                .is_some_and(|endpoint| !endpoint.trim().is_empty());
+
+            if has_command == has_endpoint {
+                errors.push(format!(
+                    "provider {provider}: exactly one startup mode must be configured in acp.command or acp.endpoint"
+                ));
+            }
+
+            if !has_command && !has_endpoint {
+                errors.push(format!(
+                    "provider {provider}: acp.command or acp.endpoint must be configured"
+                ));
+            }
+
+            if let Some(command) = &acp.command {
+                for (index, segment) in command.iter().enumerate() {
+                    if segment.trim().is_empty() {
+                        errors.push(format!(
+                            "provider {provider}: acp.command[{index}] must not be empty"
+                        ));
+                    }
+                }
+            }
+
+            push_duplicate_errors(provider, "acp.env_allowlist", &acp.env_allowlist, errors);
+        }
+        _ => {
+            if manifest.acp.is_some() {
+                errors.push(format!(
+                    "provider {provider}: acp section is only allowed for acp integration"
+                ));
+            }
+        }
+    }
 }
 
 fn require_file(provider: &str, path: &Path, errors: &mut Vec<String>) {

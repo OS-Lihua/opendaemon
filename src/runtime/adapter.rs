@@ -7,7 +7,7 @@ use crate::{
     registry::{IntegrationType, ProviderManifest},
     scheduler::workspace::PreparedWorkspace,
     security::directory::DirectoryGrant,
-    task::{event::TaskEventType, model::TaskStatus},
+    task::{event::TaskEventType, model::TaskStatus, service::TaskEventService},
 };
 
 #[derive(Debug, Clone)]
@@ -23,6 +23,7 @@ pub struct RuntimeExecutionRequest {
     pub workspace: PreparedWorkspace,
     pub timeout_seconds: u64,
     pub allow_agent_custom_env: bool,
+    pub task_event_service: Option<TaskEventService>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,6 +189,7 @@ pub trait RuntimeAdapter: Send + Sync {
 #[derive(Debug, Clone, Default)]
 pub struct AdapterSelector {
     cli: crate::runtime::cli::LocalCliAdapter,
+    acp: crate::runtime::acp::LocalAcpAdapter,
 }
 
 impl AdapterSelector {
@@ -197,7 +199,8 @@ impl AdapterSelector {
     ) -> Result<SelectedAdapter, RuntimeAdapterError> {
         match manifest.integration_type {
             IntegrationType::Cli => Ok(SelectedAdapter::Cli(self.cli.clone())),
-            IntegrationType::Acp | IntegrationType::Native => Err(RuntimeAdapterError::new(
+            IntegrationType::Acp => Ok(SelectedAdapter::Acp(self.acp.clone())),
+            IntegrationType::Native => Err(RuntimeAdapterError::new(
                 "adapter_not_implemented",
                 "provider adapter is not implemented",
             )),
@@ -212,6 +215,7 @@ impl AdapterSelector {
 #[derive(Debug, Clone)]
 pub enum SelectedAdapter {
     Cli(crate::runtime::cli::LocalCliAdapter),
+    Acp(crate::runtime::acp::LocalAcpAdapter),
 }
 
 impl RuntimeAdapter for SelectedAdapter {
@@ -221,6 +225,7 @@ impl RuntimeAdapter for SelectedAdapter {
     ) -> Pin<Box<dyn Future<Output = RuntimeExecutionOutcome> + Send + '_>> {
         match self {
             Self::Cli(adapter) => adapter.execute(request),
+            Self::Acp(adapter) => adapter.execute(request),
         }
     }
 
@@ -230,6 +235,7 @@ impl RuntimeAdapter for SelectedAdapter {
     ) -> Pin<Box<dyn Future<Output = RuntimeCancelOutcome> + Send + '_>> {
         match self {
             Self::Cli(adapter) => adapter.cancel(task_id),
+            Self::Acp(adapter) => adapter.cancel(task_id),
         }
     }
 }

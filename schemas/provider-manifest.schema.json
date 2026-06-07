@@ -1,5 +1,57 @@
 {
   "$defs": {
+    "AcpConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env_allowlist": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "transport": {
+          "$ref": "#/$defs/AcpTransport"
+        },
+        "working_directory_mode": {
+          "$ref": "#/$defs/AcpWorkingDirectoryMode"
+        }
+      },
+      "required": [
+        "transport",
+        "working_directory_mode",
+        "env_allowlist"
+      ],
+      "type": "object"
+    },
+    "AcpTransport": {
+      "enum": [
+        "stdio",
+        "local_socket"
+      ],
+      "type": "string"
+    },
+    "AcpWorkingDirectoryMode": {
+      "enum": [
+        "workspace",
+        "provider"
+      ],
+      "type": "string"
+    },
     "CancelSignal": {
       "enum": [
         "SIGTERM",
@@ -194,6 +246,14 @@
         "shell": {
           "type": "boolean"
         },
+        "supports_permission_requests": {
+          "default": false,
+          "type": "boolean"
+        },
+        "supports_resume": {
+          "default": false,
+          "type": "boolean"
+        },
         "worktree": {
           "type": "boolean"
         }
@@ -315,6 +375,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "acp": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AcpConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "capabilities": {
       "$ref": "#/$defs/ProviderCapabilities"
     },

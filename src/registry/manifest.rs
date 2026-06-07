@@ -19,6 +19,7 @@ pub struct ProviderManifest {
     pub permissions: ProviderPermissions,
     pub environment: EnvironmentConfig,
     pub security: SecurityConfig,
+    pub acp: Option<AcpConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -121,6 +122,34 @@ pub struct ProviderCapabilities {
     pub remote_execution: bool,
     pub worktree: bool,
     pub direct_directory: bool,
+    #[serde(default)]
+    pub supports_resume: bool,
+    #[serde(default)]
+    pub supports_permission_requests: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpTransport {
+    Stdio,
+    LocalSocket,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpWorkingDirectoryMode {
+    Workspace,
+    Provider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AcpConfig {
+    pub transport: AcpTransport,
+    pub command: Option<Vec<String>>,
+    pub endpoint: Option<String>,
+    pub working_directory_mode: AcpWorkingDirectoryMode,
+    pub env_allowlist: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

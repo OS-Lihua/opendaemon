@@ -4,7 +4,7 @@ use tokio::sync::RwLock;
 
 use crate::registry::{IntegrationType, ProviderManifest};
 
-use super::model::RuntimeView;
+use super::model::{RuntimeKind, RuntimeView};
 
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeStore {
@@ -35,12 +35,25 @@ impl RuntimeStore {
         let stored = self.runtimes.read().await;
         let mut runtimes = providers
             .iter()
-            .filter(|provider| provider.integration_type == IntegrationType::Cli)
+            .filter(|provider| {
+                matches!(
+                    provider.integration_type,
+                    IntegrationType::Cli | IntegrationType::Acp
+                )
+            })
             .map(|provider| {
-                stored
-                    .get(&provider.id)
-                    .cloned()
-                    .unwrap_or_else(|| RuntimeView::not_detected(provider.id.clone()))
+                stored.get(&provider.id).cloned().unwrap_or_else(|| {
+                    RuntimeView::not_detected_with_kind(
+                        provider.id.clone(),
+                        match provider.integration_type {
+                            IntegrationType::Cli => RuntimeKind::LocalCli,
+                            IntegrationType::Acp => RuntimeKind::LocalAcp,
+                            IntegrationType::Http | IntegrationType::Native => {
+                                RuntimeKind::LocalCli
+                            }
+                        },
+                    )
+                })
             })
             .collect::<Vec<_>>();
 

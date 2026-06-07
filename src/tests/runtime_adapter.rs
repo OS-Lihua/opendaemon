@@ -26,8 +26,14 @@ use crate::{
         directory_grants::{CreateDirectoryGrant, DirectoryGrantStore},
         tasks::TaskStore,
     },
-    task::{event::TaskEventType, model::CreateTask, model::TaskStatus},
-    tests::{TempDir, temp_registry_with_provider, valid_manifest_json},
+    task::{
+        event::{PermissionDecision, TaskEventType},
+        model::CreateTask,
+        model::TaskStatus,
+        permission::PermissionResponseRequest,
+        service::{TaskEventBus, TaskEventService},
+    },
+    tests::{TempDir, temp_registry_with_provider, valid_acp_manifest_json, valid_manifest_json},
 };
 
 #[test]
@@ -77,8 +83,11 @@ async fn adapter_selection_gates_non_cli_integrations_without_spawning() {
     let cli: crate::registry::ProviderManifest = serde_json::from_value(manifest).unwrap();
     assert!(selector.for_manifest(&cli).is_ok());
 
+    let acp: crate::registry::ProviderManifest =
+        serde_json::from_value(valid_acp_manifest_json()).unwrap();
+    assert!(selector.for_manifest(&acp).is_ok());
+
     for (integration_type, code) in [
-        (IntegrationType::Acp, "adapter_not_implemented"),
         (IntegrationType::Http, "remote_execution_not_allowed"),
         (IntegrationType::Native, "adapter_not_implemented"),
     ] {
@@ -87,6 +96,140 @@ async fn adapter_selection_gates_non_cli_integrations_without_spawning() {
         let error = selector.for_manifest(&manifest).unwrap_err();
         assert_eq!(error.code(), code);
     }
+}
+
+#[tokio::test]
+async fn acp_adapter_selection_and_execution_normalizes_events() {
+    let temp_dir = TempDir::new();
+    let command = write_fake_command(
+        temp_dir.path(),
+        "test-acp-provider",
+        fake_acp_provider_body(),
+    );
+    let manifest: crate::registry::ProviderManifest =
+        serde_json::from_value(valid_acp_manifest_json()).unwrap();
+    let selector = AdapterSelector::default();
+
+    let adapter = selector.for_manifest(&manifest).unwrap();
+    let outcome = adapter
+        .execute(
+            execution_request(
+                temp_dir.path(),
+                command,
+                valid_acp_manifest_json(),
+                "ACP prompt",
+            )
+            .with_runtime("rt_test_provider_local_acp"),
+        )
+        .await;
+
+    assert_eq!(outcome.status, RuntimeExecutionStatus::Completed);
+    assert_eq!(outcome.session_id.as_deref(), Some("acp-session-1"));
+    assert!(outcome.events.iter().any(|event| {
+        event.kind == TaskEventType::ProcessStdout
+            && event.payload["text"].as_str() == Some("ACP prompt")
+    }));
+}
+
+#[tokio::test]
+async fn execution_service_runs_acp_task_and_persists_session_metadata() {
+    let temp_dir = TempDir::new();
+    let command = write_fake_command(
+        temp_dir.path(),
+        "test-acp-provider",
+        fake_acp_provider_body(),
+    );
+    let state = acp_fixture(temp_dir.path(), command.clone());
+    let task = enqueue_fixture_task(&state, temp_dir.path(), Some(5)).await;
+    state
+        .runtime_store
+        .save(RuntimeView::available_with_kind(
+            "test-provider",
+            crate::runtime::model::RuntimeKind::LocalAcp,
+            command,
+            None,
+        ))
+        .await;
+
+    let completed = execution_service(&state)
+        .execute_task(&task.id)
+        .await
+        .unwrap();
+
+    assert_eq!(completed.status, TaskStatus::Completed);
+    assert_eq!(
+        completed
+            .result
+            .as_ref()
+            .and_then(|result| result.session_id.as_deref()),
+        Some("acp-session-1")
+    );
+    let events = state.task_store.list_events(&task.id).unwrap();
+    assert!(events.iter().any(|event| {
+        event.event_type == TaskEventType::ProcessStdout
+            && event.payload["text"].as_str() == Some("Do phase 6")
+    }));
+}
+
+#[tokio::test]
+async fn execution_service_bridges_acp_permission_requests_through_task_events() {
+    let temp_dir = TempDir::new();
+    let command = write_fake_command(
+        temp_dir.path(),
+        "test-acp-provider",
+        fake_acp_permission_provider_body(),
+    );
+    let state = acp_fixture_with_event_bus(temp_dir.path(), command.clone());
+    let task = enqueue_fixture_task(&state, temp_dir.path(), Some(5)).await;
+    state
+        .runtime_store
+        .save(RuntimeView::available_with_kind(
+            "test-provider",
+            crate::runtime::model::RuntimeKind::LocalAcp,
+            command,
+            None,
+        ))
+        .await;
+
+    let execution = execution_service(&state);
+    let task_id = task.id.clone();
+    let join = tokio::spawn(async move { execution.execute_task(&task_id).await.unwrap() });
+
+    let pending = loop {
+        match state.task_store.get_permission_request(&task.id, "perm_1") {
+            Ok(request) => break request,
+            Err(crate::store::tasks::TaskStoreError::PermissionRequestNotFound) => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(error) => panic!("unexpected permission request error: {error:?}"),
+        }
+    };
+    assert_eq!(pending.request.permission_kind, "shell_command");
+
+    let resolution = state
+        .task_event_service
+        .resolve_permission_response(
+            &task.id,
+            PermissionResponseRequest {
+                request_id: "perm_1".to_owned(),
+                decision: PermissionDecision::Approve,
+                reason: Some("approved".to_owned()),
+            },
+        )
+        .unwrap();
+    assert_eq!(resolution.decision, PermissionDecision::Approve);
+
+    let completed = join.await.unwrap();
+    assert_eq!(completed.status, TaskStatus::Completed);
+    let events = state.task_store.list_events(&task.id).unwrap();
+    assert!(events.iter().any(|event| {
+        event.event_type == TaskEventType::ProviderPermissionRequested
+            && event.payload["request_id"].as_str() == Some("perm_1")
+    }));
+    assert!(events.iter().any(|event| {
+        event.event_type == TaskEventType::ProviderPermissionDecided
+            && event.payload["request_id"].as_str() == Some("perm_1")
+    }));
 }
 
 #[tokio::test]
@@ -372,6 +515,7 @@ struct Fixture {
     agent_store: AgentProfileStore,
     directory_store: DirectoryGrantStore,
     task_store: TaskStore,
+    task_event_service: TaskEventService,
 }
 
 fn execution_request(
@@ -426,6 +570,7 @@ fn execution_request(
         },
         timeout_seconds: 5,
         allow_agent_custom_env: false,
+        task_event_service: None,
     }
 }
 
@@ -463,6 +608,11 @@ impl TestTaskExt for CreateTask {
 }
 
 impl crate::runtime::adapter::RuntimeExecutionRequest {
+    fn with_runtime(mut self, runtime_id: &str) -> Self {
+        self.runtime_id = runtime_id.to_owned();
+        self
+    }
+
     fn with_custom_args(mut self, custom_args: Vec<String>) -> Self {
         self.agent_profile.provider_config.custom_args = custom_args;
         self
@@ -479,6 +629,26 @@ impl crate::runtime::adapter::RuntimeExecutionRequest {
     }
 }
 
+fn fake_acp_provider_body() -> &'static str {
+    r#"
+printf '{"type":"session.started","session_id":"acp-session-1"}\n'
+read input
+printf '{"type":"message.delta","text":"%s"}\n' "$input"
+printf '{"type":"session.completed"}\n'
+"#
+}
+
+fn fake_acp_permission_provider_body() -> &'static str {
+    r#"
+printf '{"type":"session.started","session_id":"acp-session-1"}\n'
+read input
+printf '{"type":"permission.requested","request_id":"perm_1","permission_kind":"shell_command","summary":"run git push","details":{"command":["git","push"]}}\n'
+read decision
+printf '{"type":"message.delta","text":"%s"}\n' "$input"
+printf '{"type":"session.completed"}\n'
+"#
+}
+
 fn fixture(
     root: &Path,
     executable: PathBuf,
@@ -493,7 +663,12 @@ fn fixture(
     let store_config = StoreConfig::new(root.join(format!("{}.sqlite3", unique_name())));
     let agent_store = AgentProfileStore::open(store_config.clone()).unwrap();
     let directory_store = DirectoryGrantStore::open(store_config.clone()).unwrap();
-    let task_store = TaskStore::open(store_config).unwrap();
+    let event_bus = std::sync::Arc::new(TaskEventBus::default());
+    let task_store = TaskStore::open(store_config)
+        .unwrap()
+        .with_event_bus(event_bus.clone());
+    let task_event_service =
+        TaskEventService::new(task_store.clone(), event_bus, Duration::from_secs(1));
     agent_store
         .create(CreateAgentProfile {
             id: "agent".to_owned(),
@@ -530,7 +705,64 @@ fn fixture(
         agent_store,
         directory_store,
         task_store,
+        task_event_service,
     }
+}
+
+fn acp_fixture(root: &Path, executable: PathBuf) -> Fixture {
+    let (registry_temp, providers_dir) =
+        temp_registry_with_provider("test-provider", valid_acp_manifest_json());
+    let store_config = StoreConfig::new(root.join(format!("{}.sqlite3", unique_name())));
+    let agent_store = AgentProfileStore::open(store_config.clone()).unwrap();
+    let directory_store = DirectoryGrantStore::open(store_config.clone()).unwrap();
+    let event_bus = std::sync::Arc::new(TaskEventBus::default());
+    let task_store = TaskStore::open(store_config)
+        .unwrap()
+        .with_event_bus(event_bus.clone());
+    let task_event_service =
+        TaskEventService::new(task_store.clone(), event_bus, Duration::from_secs(1));
+    agent_store
+        .create(CreateAgentProfile {
+            id: "agent".to_owned(),
+            name: "Agent".to_owned(),
+            owner_product_id: "product".to_owned(),
+            provider_id: "test-provider".to_owned(),
+            model: "test-model".to_owned(),
+            instructions: None,
+            execution_policy: ExecutionPolicy {
+                default_workspace_mode: crate::agent::profile::WorkspaceMode::Direct,
+                allow_direct_directory: true,
+            },
+            provider_config: ProviderConfig::default(),
+        })
+        .unwrap();
+    fs::create_dir_all(root.join("project/.git")).unwrap();
+    directory_store
+        .create(CreateDirectoryGrant {
+            product_id: "product".to_owned(),
+            agent_id: "agent".to_owned(),
+            path: root.join("project"),
+            capabilities: vec![DirectoryCapability::Read],
+            workspace_modes: Some(vec![WorkspaceMode::Direct]),
+            default_workspace_mode: Some(WorkspaceMode::Direct),
+            lock_policy: Some(DirectoryLockPolicy::Shared),
+            direct_mode_requires_explicit_task_opt_in: Some(true),
+        })
+        .unwrap();
+    assert!(executable.exists());
+    Fixture {
+        _registry_temp: registry_temp,
+        providers_dir,
+        runtime_store: RuntimeStore::default(),
+        agent_store,
+        directory_store,
+        task_store,
+        task_event_service,
+    }
+}
+
+fn acp_fixture_with_event_bus(root: &Path, executable: PathBuf) -> Fixture {
+    acp_fixture(root, executable)
 }
 
 async fn enqueue_fixture_task(

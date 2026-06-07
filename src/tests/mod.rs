@@ -79,6 +79,22 @@ fn valid_manifest_json() -> Value {
     })
 }
 
+fn valid_acp_manifest_json() -> Value {
+    let mut manifest = valid_manifest_json();
+    manifest["integration_type"] = json!("acp");
+    manifest["capabilities"]["supports_resume"] = json!(true);
+    manifest["capabilities"]["supports_permission_requests"] = json!(true);
+    manifest["permissions"]["supports_permission_events"] = json!(true);
+    manifest["acp"] = json!({
+        "transport": "stdio",
+        "command": ["test-acp-provider"],
+        "endpoint": null,
+        "working_directory_mode": "workspace",
+        "env_allowlist": []
+    });
+    manifest
+}
+
 fn temp_registry_with_provider(provider_dir: &str, manifest: Value) -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new();
     let providers_dir = temp_dir.path().join("registry/providers");

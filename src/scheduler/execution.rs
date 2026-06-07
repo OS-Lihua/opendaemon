@@ -7,7 +7,7 @@ use crate::{
     registry::{self, IntegrationType},
     runtime::{
         adapter::{AdapterSelector, RuntimeAdapter, RuntimeAdapterError, RuntimeExecutionOutcome},
-        model::{RuntimeStatus, RuntimeView},
+        model::{RuntimeKind, RuntimeStatus, RuntimeView},
         store::RuntimeStore,
     },
     scheduler::{
@@ -95,16 +95,11 @@ where
             .ok_or(ExecutionError::RuntimeUnavailable)?
             .manifest
             .clone();
-        if manifest.integration_type != IntegrationType::Cli {
-            return Err(ExecutionError::Adapter(
-                self.adapter_selector.for_manifest(&manifest).unwrap_err(),
-            ));
-        }
         let runtime = self
             .runtime_store
             .get(&profile.provider_id)
             .await
-            .filter(runtime_available)
+            .filter(|runtime| runtime_available(runtime, manifest.integration_type))
             .ok_or(ExecutionError::RuntimeUnavailable)?;
         let executable = runtime
             .executable
@@ -117,6 +112,13 @@ where
             self.directory_grant_store.clone(),
             self.scheduler_config,
         );
+        let task_event_service = self.task_store.event_bus().map(|bus| {
+            crate::task::service::TaskEventService::new(
+                self.task_store.clone(),
+                bus,
+                self.scheduler_config.task_event_heartbeat_interval,
+            )
+        });
         match scheduler.try_acquire_directory_lock(&LockRequest::from_task(&task))? {
             LockDecision::Acquired | LockDecision::NotRequired => {}
             LockDecision::Waiting => {
@@ -145,6 +147,7 @@ where
                 workspace: workspace.clone(),
                 timeout_seconds: task.timeout_seconds.unwrap_or(DEFAULT_TASK_TIMEOUT_SECONDS),
                 allow_agent_custom_env: self.scheduler_config.allow_agent_custom_env,
+                task_event_service,
             })
             .await;
 
@@ -210,8 +213,20 @@ where
     }
 }
 
-fn runtime_available(runtime: &RuntimeView) -> bool {
-    runtime.status == RuntimeStatus::Available && runtime.executable.is_some()
+fn runtime_available(runtime: &RuntimeView, integration_type: IntegrationType) -> bool {
+    if runtime.status != RuntimeStatus::Available {
+        return false;
+    }
+
+    match integration_type {
+        IntegrationType::Cli => {
+            runtime.kind == RuntimeKind::LocalCli && runtime.executable.is_some()
+        }
+        IntegrationType::Acp => {
+            runtime.kind == RuntimeKind::LocalAcp && runtime.executable.is_some()
+        }
+        IntegrationType::Http | IntegrationType::Native => false,
+    }
 }
 
 fn result_from_outcome(

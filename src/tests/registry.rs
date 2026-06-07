@@ -5,8 +5,8 @@ use serde_json::json;
 use crate::{
     registry::{self, ProviderManifest},
     tests::{
-        replace_manifest_field, temp_registry_with_provider, valid_manifest_json,
-        write_provider_fixture,
+        replace_manifest_field, temp_registry_with_provider, valid_acp_manifest_json,
+        valid_manifest_json, write_provider_fixture,
     },
 };
 
@@ -222,6 +222,64 @@ fn validation_rejects_invalid_json() {
     .unwrap();
 
     assert_registry_error_contains(&providers_dir, "failed to parse");
+}
+
+#[test]
+fn acp_manifest_deserializes() {
+    let manifest: ProviderManifest = serde_json::from_value(valid_acp_manifest_json()).unwrap();
+
+    assert_eq!(manifest.id, "test-provider");
+    assert_eq!(
+        manifest.integration_type,
+        crate::registry::IntegrationType::Acp
+    );
+}
+
+#[test]
+fn validation_accepts_valid_acp_manifest() {
+    let (_temp_dir, providers_dir) =
+        temp_registry_with_provider("test-provider", valid_acp_manifest_json());
+
+    registry::load_registry_from_dir(&providers_dir).unwrap();
+}
+
+#[test]
+fn validation_rejects_acp_manifest_without_startup_mode() {
+    let (_temp_dir, providers_dir) =
+        temp_registry_with_provider("test-provider", valid_acp_manifest_json());
+    replace_manifest_field(&providers_dir, "test-provider", |manifest| {
+        manifest["acp"]["command"] = json!(null);
+    });
+
+    assert_registry_error_contains(&providers_dir, "acp.command or acp.endpoint");
+}
+
+#[test]
+fn validation_rejects_acp_manifest_with_ambiguous_startup_mode() {
+    let (_temp_dir, providers_dir) =
+        temp_registry_with_provider("test-provider", valid_acp_manifest_json());
+    replace_manifest_field(&providers_dir, "test-provider", |manifest| {
+        manifest["acp"]["endpoint"] = json!("http://127.0.0.1:7777");
+    });
+
+    assert_registry_error_contains(&providers_dir, "exactly one startup mode");
+}
+
+#[test]
+fn validation_rejects_cli_manifest_with_acp_section() {
+    let (_temp_dir, providers_dir) =
+        temp_registry_with_provider("test-provider", valid_manifest_json());
+    replace_manifest_field(&providers_dir, "test-provider", |manifest| {
+        manifest["acp"] = json!({
+            "transport": "stdio",
+            "command": ["test-provider"],
+            "endpoint": null,
+            "working_directory_mode": "workspace",
+            "env_allowlist": []
+        });
+    });
+
+    assert_registry_error_contains(&providers_dir, "acp section is only allowed");
 }
 
 fn assert_registry_error_contains(providers_dir: &std::path::Path, expected: &str) {

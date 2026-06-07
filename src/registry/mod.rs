@@ -10,10 +10,10 @@ use std::{
 use anyhow::Context;
 
 pub use manifest::{
-    CancelSignal, DetectConfig, DirectoryLockMode, EnvironmentConfig, ExecutionConfig,
-    ExecutionInputMode, InstallInstructions, IntegrationType, ModelConfig, ProviderCapabilities,
-    ProviderManifest, ProviderPermissions, ProviderStatus, SecurityConfig, SecurityReviewLevel,
-    VendorInfo, WorkingDirectoryMode,
+    AcpConfig, AcpTransport, AcpWorkingDirectoryMode, CancelSignal, DetectConfig,
+    DirectoryLockMode, EnvironmentConfig, ExecutionConfig, ExecutionInputMode, InstallInstructions,
+    IntegrationType, ModelConfig, ProviderCapabilities, ProviderManifest, ProviderPermissions,
+    ProviderStatus, SecurityConfig, SecurityReviewLevel, VendorInfo, WorkingDirectoryMode,
 };
 
 pub const PROVIDERS_REGISTRY_PATH: &str = "registry/providers";

@@ -9,24 +9,28 @@ use tokio::{io::AsyncReadExt, process::Command, task::JoinHandle, time};
 
 use crate::{
     config::{RuntimeDetectionConfig, RuntimeEnvironment},
-    registry::{IntegrationType, ProviderManifest},
+    registry::{AcpTransport, IntegrationType, ProviderManifest},
 };
 
-use super::model::{RuntimeError, RuntimeView, override_env_var_name};
+use super::model::{RuntimeError, RuntimeKind, RuntimeView, override_env_var_name};
 
 pub async fn detect_provider(
     manifest: &ProviderManifest,
     config: &RuntimeDetectionConfig,
 ) -> RuntimeView {
-    if manifest.integration_type != IntegrationType::Cli {
-        return RuntimeView::error(
-            manifest.id.clone(),
-            None,
-            RuntimeError::new(
-                "unsupported_provider_integration",
-                "provider integration is not supported by local CLI detection",
-            ),
-        );
+    match manifest.integration_type {
+        IntegrationType::Cli => {}
+        IntegrationType::Acp => return detect_acp_provider(manifest, config).await,
+        IntegrationType::Http | IntegrationType::Native => {
+            return RuntimeView::error(
+                manifest.id.clone(),
+                None,
+                RuntimeError::new(
+                    "unsupported_provider_integration",
+                    "provider integration is not supported by local runtime detection",
+                ),
+            );
+        }
     }
 
     let executable = match resolve_executable(manifest, &config.environment) {
@@ -50,15 +54,87 @@ pub async fn detect_providers(
 ) -> Vec<RuntimeView> {
     let mut runtimes = Vec::new();
 
-    for provider in providers
-        .iter()
-        .filter(|provider| provider.integration_type == IntegrationType::Cli)
-    {
+    for provider in providers.iter().filter(|provider| {
+        matches!(
+            provider.integration_type,
+            IntegrationType::Cli | IntegrationType::Acp
+        )
+    }) {
         runtimes.push(detect_provider(provider, config).await);
     }
 
     runtimes.sort_by(|left, right| left.provider_id.cmp(&right.provider_id));
     runtimes
+}
+
+async fn detect_acp_provider(
+    manifest: &ProviderManifest,
+    config: &RuntimeDetectionConfig,
+) -> RuntimeView {
+    let Some(acp) = &manifest.acp else {
+        return RuntimeView::error_with_kind(
+            manifest.id.clone(),
+            RuntimeKind::LocalAcp,
+            None,
+            RuntimeError::new(
+                "acp_invalid_configuration",
+                "provider acp configuration is missing",
+            ),
+        );
+    };
+
+    match acp.transport {
+        AcpTransport::Stdio => {
+            let Some(command) = acp.command.as_ref().and_then(|segments| segments.first()) else {
+                return RuntimeView::error_with_kind(
+                    manifest.id.clone(),
+                    RuntimeKind::LocalAcp,
+                    None,
+                    RuntimeError::new(
+                        "acp_invalid_configuration",
+                        "acp stdio transport requires a command",
+                    ),
+                );
+            };
+
+            match resolve_path_command(command, &config.environment) {
+                Some(executable) => RuntimeView::available_with_kind(
+                    manifest.id.clone(),
+                    RuntimeKind::LocalAcp,
+                    executable,
+                    None,
+                ),
+                None => RuntimeView::unavailable_with_kind(
+                    manifest.id.clone(),
+                    RuntimeKind::LocalAcp,
+                    RuntimeError::new(
+                        "acp_runtime_unavailable",
+                        "no configured acp command was found",
+                    ),
+                ),
+            }
+        }
+        AcpTransport::LocalSocket => {
+            if acp.endpoint.as_deref().is_some() {
+                RuntimeView::available_with_kind(
+                    manifest.id.clone(),
+                    RuntimeKind::LocalAcp,
+                    PathBuf::from("acp://local-socket"),
+                    None,
+                )
+            } else {
+                RuntimeView::error_with_kind(
+                    manifest.id.clone(),
+                    RuntimeKind::LocalAcp,
+                    None,
+                    RuntimeError::new(
+                        "acp_invalid_configuration",
+                        "acp local_socket transport requires an endpoint",
+                    ),
+                )
+            }
+        }
+    }
 }
 
 fn resolve_executable(
