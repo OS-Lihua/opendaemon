@@ -1,5 +1,5 @@
-use std::{fs, path::Path};
 use std::time::Duration;
+use std::{fs, path::Path};
 
 use axum::{
     Json,
@@ -234,7 +234,10 @@ async fn task_event_service_replays_from_cursor_tails_live_and_emits_heartbeat()
     let service = state.task_event_service();
     let mut stream = service.stream(&task.id, 1).unwrap();
 
-    match timeout(Duration::from_secs(1), stream.recv()).await.unwrap() {
+    match timeout(Duration::from_secs(1), stream.recv())
+        .await
+        .unwrap()
+    {
         Some(TaskStreamFrame::Event(event)) => {
             assert_eq!(event.sequence, 2);
             assert_eq!(event.event_type, TaskEventType::WaitingDirectoryLock);
@@ -242,7 +245,10 @@ async fn task_event_service_replays_from_cursor_tails_live_and_emits_heartbeat()
         other => panic!("unexpected frame: {other:?}"),
     }
 
-    match timeout(Duration::from_secs(1), stream.recv()).await.unwrap() {
+    match timeout(Duration::from_secs(1), stream.recv())
+        .await
+        .unwrap()
+    {
         Some(TaskStreamFrame::Event(event)) => {
             assert_eq!(event.sequence, 3);
             assert_eq!(event.event_type, TaskEventType::Preparing);
@@ -250,7 +256,10 @@ async fn task_event_service_replays_from_cursor_tails_live_and_emits_heartbeat()
         other => panic!("unexpected frame: {other:?}"),
     }
 
-    match timeout(Duration::from_millis(200), stream.recv()).await.unwrap() {
+    match timeout(Duration::from_millis(200), stream.recv())
+        .await
+        .unwrap()
+    {
         Some(TaskStreamFrame::Heartbeat) => {}
         other => panic!("unexpected frame: {other:?}"),
     }
@@ -264,7 +273,10 @@ async fn task_event_service_replays_from_cursor_tails_live_and_emits_heartbeat()
         )
         .unwrap();
 
-    match timeout(Duration::from_secs(1), stream.recv()).await.unwrap() {
+    match timeout(Duration::from_secs(1), stream.recv())
+        .await
+        .unwrap()
+    {
         Some(TaskStreamFrame::Event(event)) => {
             assert_eq!(event.event_type, TaskEventType::ProcessStdout);
             assert_eq!(event.payload["text"], "hello");
@@ -294,12 +306,18 @@ async fn terminal_task_event_stream_replays_then_closes() {
         .task_store()
         .transition(&task.id, TaskStatus::Running, None)
         .unwrap();
-    state.task_store().transition(&task.id, TaskStatus::Completed, None).unwrap();
+    state
+        .task_store()
+        .transition(&task.id, TaskStatus::Completed, None)
+        .unwrap();
     let service = state.task_event_service();
     let mut stream = service.stream(&task.id, 0).unwrap();
 
     let mut seen = Vec::new();
-    while let Some(frame) = timeout(Duration::from_secs(1), stream.recv()).await.unwrap() {
+    while let Some(frame) = timeout(Duration::from_secs(1), stream.recv())
+        .await
+        .unwrap()
+    {
         match frame {
             TaskStreamFrame::Event(event) => seen.push(event.event_type),
             TaskStreamFrame::Heartbeat => panic!("terminal stream should not heartbeat"),
@@ -349,9 +367,7 @@ fn task_store_persists_permission_requests_and_idempotent_resolution() {
     );
 
     let reopened = temp_task_store(temp_dir.path());
-    let pending = reopened
-        .get_permission_request(&task.id, "perm_1")
-        .unwrap();
+    let pending = reopened.get_permission_request(&task.id, "perm_1").unwrap();
     assert_eq!(pending.status, PermissionRequestStatus::Pending);
 
     let resolution = reopened
@@ -379,12 +395,8 @@ fn task_store_persists_permission_requests_and_idempotent_resolution() {
         .unwrap();
     assert!(duplicate.duplicated);
 
-    let conflict = reopened.resolve_permission_request(
-        &task.id,
-        "perm_1",
-        PermissionDecision::Deny,
-        None,
-    );
+    let conflict =
+        reopened.resolve_permission_request(&task.id, "perm_1", PermissionDecision::Deny, None);
     assert!(matches!(
         conflict.unwrap_err(),
         crate::store::tasks::TaskStoreError::PermissionRequestAlreadyResolved
@@ -867,7 +879,10 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
     .0;
     assert_eq!(response.status, "resolved");
     assert_eq!(response.decision, PermissionDecision::Approve);
-    let decision = timeout(Duration::from_secs(1), waiter).await.unwrap().unwrap();
+    let decision = timeout(Duration::from_secs(1), waiter)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(decision.decision, PermissionDecision::Approve);
 
     let duplicate = task_post_event(
@@ -916,7 +931,12 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
     )
     .await
     .unwrap_err();
-    assert_error(missing, StatusCode::NOT_FOUND, "permission_request_not_found").await;
+    assert_error(
+        missing,
+        StatusCode::NOT_FOUND,
+        "permission_request_not_found",
+    )
+    .await;
 
     let invalid = task_post_event(
         State(state.clone()),

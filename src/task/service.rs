@@ -10,7 +10,7 @@ use crate::{
     store::tasks::{TaskStore, TaskStoreError},
     task::{
         event::{PermissionDecisionEvent, TaskEvent, TaskEventType},
-        permission::{PermissionResponseRequest, PermissionRequestStatus, PermissionResolution},
+        permission::{PermissionRequestStatus, PermissionResolution, PermissionResponseRequest},
     },
 };
 
@@ -61,11 +61,7 @@ impl TaskEventBus {
         receiver
     }
 
-    pub fn notify_permission_resolution(
-        &self,
-        task_id: &str,
-        decision: &PermissionDecisionEvent,
-    ) {
+    pub fn notify_permission_resolution(&self, task_id: &str, decision: &PermissionDecisionEvent) {
         if let Some(waiter) = self
             .waiters
             .lock()
@@ -232,7 +228,9 @@ impl TaskEventService {
         task_id: &str,
         response: PermissionResponseRequest,
     ) -> Result<PermissionResolution, TaskEventServiceError> {
-        let existing = self.store.get_permission_request(task_id, &response.request_id)?;
+        let existing = self
+            .store
+            .get_permission_request(task_id, &response.request_id)?;
         if existing.status == PermissionRequestStatus::Pending
             && !self.bus.has_waiter(task_id, &response.request_id)
         {
@@ -245,8 +243,9 @@ impl TaskEventService {
             response.decision,
             response.reason,
         )?;
-        let decided: PermissionDecisionEvent = serde_json::from_value(resolution.event.payload.clone())
-            .map_err(|error| TaskEventServiceError::StorePayload(error.into()))?;
+        let decided: PermissionDecisionEvent =
+            serde_json::from_value(resolution.event.payload.clone())
+                .map_err(|error| TaskEventServiceError::StorePayload(error.into()))?;
         if !resolution.duplicated {
             self.bus.publish(resolution.event.clone());
         }

@@ -170,7 +170,11 @@ pub async fn post_event(
     let decision = match request.decision.as_str() {
         "approve" => PermissionDecision::Approve,
         "deny" => PermissionDecision::Deny,
-        _ => return Err(ApiError::TaskEvents(TaskEventServiceError::InvalidPermissionDecision)),
+        _ => {
+            return Err(ApiError::TaskEvents(
+                TaskEventServiceError::InvalidPermissionDecision,
+            ));
+        }
     };
     let resolution = state.task_event_service().resolve_permission_response(
         &task_id,
