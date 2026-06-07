@@ -105,8 +105,8 @@ Providers are registered through manifests under `registry/providers/<id>/`.
 
 ### Runtime
 
-A provider installation discovered on the user's machine, or a configured
-remote provider endpoint that can execute tasks through an adapter.
+A provider installation discovered on the user's machine, or a configured remote
+provider endpoint that can execute tasks through an adapter.
 
 Example:
 
@@ -195,16 +195,17 @@ another product's fixer agent write access to the same repository.
 Workspace mode controls where the provider process runs.
 
 - `worktree`: create or reuse an isolated git worktree and run the agent there.
-  This is the default for repositories because it gives better rollback,
-  review, diff extraction, and concurrent task isolation.
+  This is the default for repositories because it gives better rollback, review,
+  diff extraction, and concurrent task isolation.
 - `direct`: run the agent in the original authorized directory. This is useful
   when a user explicitly wants the agent to operate on the real working tree,
   when the directory is not a git repository, or when a provider cannot work in
   a generated worktree.
 
 The daemon should choose `worktree` by default when the directory is a git
-repository and the grant permits it. A task can request `direct`, but direct mode
-is allowed only when the grant, Agent Profile, and product scope all permit it.
+repository and the grant permits it. A task can request `direct`, but direct
+mode is allowed only when the grant, Agent Profile, and product scope all permit
+it.
 
 ### Task
 
@@ -512,8 +513,8 @@ PATCH /v1/directories/:directory_id
 DELETE /v1/directories/:directory_id
 ```
 
-`POST /v1/directories/grant` accepts a local path only from a trusted local UI or
-CLI. Remote products should use existing `directory_id` values.
+`POST /v1/directories/grant` accepts a local path only from a trusted local UI
+or CLI. Remote products should use existing `directory_id` values.
 
 ### Tasks
 
@@ -711,8 +712,8 @@ CI should validate:
 - required files exist
 - template variables are known
 - command names are not absolute paths unless explicitly allowed
-- install, detect, execution, capabilities, permissions, and security fields
-  are present
+- install, detect, execution, capabilities, permissions, and security fields are
+  present
 - examples parse as valid tasks
 - capabilities do not imply default authorization
 - README documents installation, environment variables, data policy, and known
@@ -1055,8 +1056,8 @@ Acceptance criteria:
 
 - ACP providers can be registered through manifest metadata
 - ACP task events normalize into the same product-facing event stream
-- permission behavior follows Agent Profile provider config and explicit
-  product responses when the protocol requires a response
+- permission behavior follows Agent Profile provider config and explicit product
+  responses when the protocol requires a response
 
 ### Phase 10: Control Plane
 

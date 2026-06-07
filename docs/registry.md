@@ -19,8 +19,9 @@ name consistency, and schema freshness for
 `schemas/provider-manifest.schema.json`.
 
 Capabilities in a manifest are declarations only. They do not grant
-authorization, directory access, provider execution rights, or access to secrets.
-Future runtime phases must still request and enforce permissions separately.
+authorization, directory access, provider execution rights, or access to
+secrets. Future runtime phases must still request and enforce permissions
+separately.
 
 Providers that send prompts, files, repository context, or code to a vendor or
 remote service must disclose that behavior in `manifest.json` through

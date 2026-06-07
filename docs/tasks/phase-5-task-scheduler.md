@@ -23,9 +23,9 @@ routes:
 - `GET /v1/tasks/:task_id`
 - `POST /v1/tasks/:task_id/cancel`
 
-Phase 5 must not execute provider commands. Runtime adapters, process
-execution, stdout/stderr streaming, provider protocol events, ACP sessions, and
-remote HTTP execution remain Phase 6 and later work.
+Phase 5 must not execute provider commands. Runtime adapters, process execution,
+stdout/stderr streaming, provider protocol events, ACP sessions, and remote HTTP
+execution remain Phase 6 and later work.
 
 ## Scope
 
@@ -429,8 +429,8 @@ Minimum shape:
 ```
 
 Phase 5 should support storing this result shape but should not populate
-provider-specific fields from real execution. Tests may insert synthetic
-results through store APIs.
+provider-specific fields from real execution. Tests may insert synthetic results
+through store APIs.
 
 ## Task-Time Validation
 
@@ -458,8 +458,8 @@ If `required_capabilities` is omitted, default to:
 ["read"]
 ```
 
-If the task is expected to modify files, the product must request `write`.
-Phase 5 does not infer write intent from prompt contents.
+If the task is expected to modify files, the product must request `write`. Phase
+5 does not infer write intent from prompt contents.
 
 Reject empty `required_capabilities`.
 
@@ -539,11 +539,11 @@ Phase 5 requirements:
 - For `direct`, no cleanup operation may delete the original directory.
 - For `worktree`, define the data model and abstraction for a prepared
   workspace.
-- For `worktree`, implementation may use a fake preparer in tests and defer
-  real `git worktree add` until the scheduler boundary is ready.
-- If real worktree creation is implemented in Phase 5, it must be behind a
-  small interface, must use direct `git` process invocation without shell, and
-  must have tests that do not depend on a developer's global git config.
+- For `worktree`, implementation may use a fake preparer in tests and defer real
+  `git worktree add` until the scheduler boundary is ready.
+- If real worktree creation is implemented in Phase 5, it must be behind a small
+  interface, must use direct `git` process invocation without shell, and must
+  have tests that do not depend on a developer's global git config.
 
 Preferred Phase 5 implementation is the abstraction plus deterministic fake
 preparer tests. Real git worktree creation can land later if it stays small and
@@ -862,8 +862,8 @@ Phase 0 through Phase 4.
   - initialize task, task event, and directory lock schemas idempotently
 
 - `src/tests/tasks.rs`
-  - cover model validation, state transitions, store persistence, task API,
-    lock behavior, cancellation, and Phase 4 integration
+  - cover model validation, state transitions, store persistence, task API, lock
+    behavior, cancellation, and Phase 4 integration
 
 ## Application State
 
@@ -1169,7 +1169,7 @@ the repository and should not be committed.
 - [x] `POST /v1/tasks/:task_id/cancel` exists.
 - [x] Task API returns stable error JSON.
 - [x] Task API responses exclude provider secrets, runtime adapter internals,
-  control-plane tokens, and unapproved paths.
+      control-plane tokens, and unapproved paths.
 - [x] Provider API behavior remains stable.
 - [x] Runtime API behavior remains stable.
 - [x] Directory API behavior remains stable.
@@ -1179,8 +1179,7 @@ the repository and should not be committed.
 - [x] No remote runtime execution is added.
 - [x] No ACP adapter is added.
 - [x] `cargo fmt --all -- --check` passes.
-- [x] `cargo clippy --tests --all-targets --all-features -- -D warnings`
-  passes.
+- [x] `cargo clippy --tests --all-targets --all-features -- -D warnings` passes.
 - [x] `cargo test --all-features --all-targets` passes.
 - [x] `just registry-check` passes.
 

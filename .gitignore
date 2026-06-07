@@ -301,3 +301,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# codegraph
+.codegraph/

@@ -10,9 +10,11 @@ Phase 8 adds local product authentication for the HTTP API:
 - durable product registry
 - durable product API tokens
 - scope-based authorization
-- product ownership enforcement across agents, directories, tasks, and task events
+- product ownership enforcement across agents, directories, tasks, and task
+  events
 
-The daemon remains a local service. Phase 8 does not add remote control-plane auth, user login, OAuth, or reverse-proxy hardening.
+The daemon remains a local service. Phase 8 does not add remote control-plane
+auth, user login, OAuth, or reverse-proxy hardening.
 
 ## Running The Daemon
 
@@ -79,10 +81,13 @@ Bootstrap token only:
 ## Security Notes
 
 - Treat bootstrap tokens and product tokens as local machine credentials.
-- Do not expose the daemon on a public interface unless you are deliberately accepting the added risk.
-- Do not pass daemon credentials through task payloads, provider config, or child-process environment variables.
+- Do not expose the daemon on a public interface unless you are deliberately
+  accepting the added risk.
+- Do not pass daemon credentials through task payloads, provider config, or
+  child-process environment variables.
 
-See [docs/security/local-api-auth.md](docs/security/local-api-auth.md) for the local boundary notes.
+See [docs/security/local-api-auth.md](docs/security/local-api-auth.md) for the
+local boundary notes.
 
 ### DEV
 

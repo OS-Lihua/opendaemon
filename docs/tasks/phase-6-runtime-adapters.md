@@ -251,8 +251,8 @@ Requirements:
 - timeout maps to `timed_out`
 - cancellation maps to `cancelled`
 - stderr alone does not imply failure when exit code is zero
-- provider-specific data is stored under `provider_result` only when
-  structured and non-secret
+- provider-specific data is stored under `provider_result` only when structured
+  and non-secret
 
 ## Local CLI Adapter
 
@@ -305,8 +305,8 @@ Support the manifest `execution.input_mode` values:
 
 - `arg`: prompt is rendered through `{{prompt}}` in args
 - `stdin`: prompt is written to child stdin
-- `temp_file`: prompt is written to an OpenDaemon-managed temporary file and
-  the file path is rendered through `{{prompt}}` or a dedicated template value
+- `temp_file`: prompt is written to an OpenDaemon-managed temporary file and the
+  file path is rendered through `{{prompt}}` or a dedicated template value
 
 Rules:
 
@@ -863,8 +863,7 @@ Expected behavior:
 - [x] agent API behavior remains stable.
 - [x] task API behavior remains stable.
 - [x] `cargo fmt --all -- --check` passes.
-- [x] `cargo clippy --tests --all-targets --all-features -- -D warnings`
-  passes.
+- [x] `cargo clippy --tests --all-targets --all-features -- -D warnings` passes.
 - [x] `cargo test --all-features --all-targets` passes.
 - [x] `just registry-check` passes.
 

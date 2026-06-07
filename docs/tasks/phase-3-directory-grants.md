@@ -37,14 +37,15 @@ Phase 3 delivers only local directory grant behavior:
 - define reusable authorization helpers for future task validation
 - enforce product ID, agent ID, directory ID, capability, and workspace mode
   combinations in those helpers
-- reject direct mode unless the grant allows it and the caller explicitly opts in
+- reject direct mode unless the grant allows it and the caller explicitly opts
+  in
 - add path guard tests for traversal and symlink behavior
 - keep provider and runtime API behavior unchanged
 - quality gates passing
 
 Directory grants are local authorization records only. They do not prove that a
-provider runtime is installed, that an Agent Profile exists, or that any task can
-execute yet.
+provider runtime is installed, that an Agent Profile exists, or that any task
+can execute yet.
 
 ## Inputs
 
@@ -120,9 +121,9 @@ Do not add or design these in Phase 3:
 - control plane
 - desktop UI
 
-Phase 3 may accept a raw local path only through
-`POST /v1/directories/grant`, which represents a trusted local UI or local CLI
-action. It must not add any raw-path task API.
+Phase 3 may accept a raw local path only through `POST /v1/directories/grant`,
+which represents a trusted local UI or local CLI action. It must not add any
+raw-path task API.
 
 ## Dependencies
 
@@ -876,7 +877,7 @@ Expected behavior:
 - [x] Authorization helper validates required capabilities.
 - [x] Authorization helper validates workspace mode.
 - [x] Authorization helper rejects direct mode without explicit opt-in when
-  required.
+      required.
 - [x] `GET /v1/directories` exists.
 - [x] `POST /v1/directories/grant` exists.
 - [x] `GET /v1/directories/:directory_id` exists.
@@ -884,15 +885,14 @@ Expected behavior:
 - [x] `DELETE /v1/directories/:directory_id` exists.
 - [x] Directory API returns stable error JSON.
 - [x] Directory API responses exclude secrets, runtime status, task state,
-  prompts, and capacity claims.
+      prompts, and capacity claims.
 - [x] Provider API behavior remains stable.
 - [x] Runtime API behavior remains stable.
 - [x] No task API is added.
 - [x] No provider task execution is added.
 - [x] No worktrees are created.
 - [x] `cargo fmt --all -- --check` passes.
-- [x] `cargo clippy --tests --all-targets --all-features -- -D warnings`
-  passes.
+- [x] `cargo clippy --tests --all-targets --all-features -- -D warnings` passes.
 - [x] `cargo test --all-features --all-targets` passes.
 - [x] `just registry-check` passes.
 

@@ -154,11 +154,11 @@ Response requirements:
 Expected JSON shape:
 
 ```json
-{"status":"ok","service":"opendaemon","version":"0.1.0"}
+{ "status": "ok", "service": "opendaemon", "version": "0.1.0" }
 ```
 
-The response must not include provider, runtime, task, directory grant, registry,
-or control-plane status in Phase 0.
+The response must not include provider, runtime, task, directory grant,
+registry, or control-plane status in Phase 0.
 
 ## Source Layout
 
@@ -246,8 +246,8 @@ src/
   - placeholder module comment only
   - no task API or lifecycle model
 
-Placeholder modules should avoid unused public APIs. A short module-level comment
-is enough when the module has no Phase 0 behavior.
+Placeholder modules should avoid unused public APIs. A short module-level
+comment is enough when the module has no Phase 0 behavior.
 
 ## Implementation Steps
 
@@ -256,8 +256,7 @@ is enough when the module has no Phase 0 behavior.
 Update `Cargo.toml`:
 
 - `package.name = "opendaemon"`
-- authors use neutral project metadata, for example
-  `OpenDaemon contributors`
+- authors use neutral project metadata, for example `OpenDaemon contributors`
 - cargo-release README replacement snippets use `opendaemon`
 
 Update only necessary user-facing template text:
@@ -319,7 +318,7 @@ Acceptance:
 - JSON is exactly:
 
 ```json
-{"status":"ok","service":"opendaemon","version":"<package version>"}
+{ "status": "ok", "service": "opendaemon", "version": "<package version>" }
 ```
 
 ### Step 0.5: Add Daemon Server Runtime
@@ -405,7 +404,7 @@ curl http://127.0.0.1:19514/health
 Expected curl response:
 
 ```json
-{"status":"ok","service":"opendaemon","version":"0.1.0"}
+{ "status": "ok", "service": "opendaemon", "version": "0.1.0" }
 ```
 
 ## Completion Checklist
@@ -425,8 +424,7 @@ Expected curl response:
 - [ ] Placeholder modules do not expose unused public APIs.
 - [ ] Tests cover CLI, health API, router, and daemon shutdown.
 - [ ] `cargo fmt --all -- --check` passes.
-- [ ] `cargo clippy --tests --all-targets --all-features -- -D warnings`
-  passes.
+- [ ] `cargo clippy --tests --all-targets --all-features -- -D warnings` passes.
 - [ ] `cargo test --all-features --all-targets` passes.
 
 ## Handoff to Phase 1

@@ -64,7 +64,8 @@ installed or online.
 - Registry loading reads all manifests under `registry/providers/<id>/`.
 - Validation rejects malformed manifests.
 - Validation rejects duplicate manifest IDs.
-- Validation rejects directory IDs that do not match the provider directory name.
+- Validation rejects directory IDs that do not match the provider directory
+  name.
 - `GET /v1/providers` returns normalized provider manifests.
 - `GET /v1/providers/:provider_id` returns one normalized provider manifest.
 - Missing providers return HTTP `404`.
@@ -107,8 +108,8 @@ schemars = { version = "1", features = ["derive"] }
 jsonschema = "0.33"
 ```
 
-If the latest `schemars` or `jsonschema` API differs at implementation time,
-use the current stable API and keep the dependency purpose unchanged.
+If the latest `schemars` or `jsonschema` API differs at implementation time, use
+the current stable API and keep the dependency purpose unchanged.
 
 Do not add SQLite, websocket, keyring, command execution, runtime detection,
 template rendering, file watching, or provider process dependencies in Phase 1.
@@ -636,10 +637,10 @@ Expected behavior:
 - [ ] `opendaemon registry-check` exists.
 - [ ] `just registry-check` exists.
 - [ ] `docs/registry.md` documents PR requirements.
-- [ ] Tests cover manifest, validation, schema, API, and registry-check behavior.
+- [ ] Tests cover manifest, validation, schema, API, and registry-check
+      behavior.
 - [ ] `cargo fmt --all -- --check` passes.
-- [ ] `cargo clippy --tests --all-targets --all-features -- -D warnings`
-  passes.
+- [ ] `cargo clippy --tests --all-targets --all-features -- -D warnings` passes.
 - [ ] `cargo test --all-features --all-targets` passes.
 - [ ] `just registry-check` passes.
 

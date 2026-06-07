@@ -22,7 +22,7 @@ init:
 # install prek (which is the alternative tool of pre-commit)
 install-prek:
     prek uninstall
-    prek install .
+    prek install --hook-type pre-commit --hook-type pre-push .
 
 # e2e env bootstrap (uv)
 [unix]

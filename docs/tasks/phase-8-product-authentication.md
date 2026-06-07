@@ -48,9 +48,9 @@ Phase 8 delivers local multi-product authentication and authorization:
   SSE behavior apart from the new auth boundary
 - quality gates passing
 
-Phase 8 is the local production authentication layer from the roadmap. It is
-not the cloud control-plane token model. The daemon remains a loopback service
-in this phase.
+Phase 8 is the local production authentication layer from the roadmap. It is not
+the cloud control-plane token model. The daemon remains a loopback service in
+this phase.
 
 ## Inputs
 

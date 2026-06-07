@@ -39,6 +39,7 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+        stages: [pre-commit]
 
   - repo: local
     hooks:
@@ -48,6 +49,7 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+        stages: [pre-commit]
 
   - repo: local
     hooks:
@@ -57,7 +59,7 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
-        stages: [push]
+        stages: [pre-commit, pre-push]
 
   - repo: local
     hooks:
@@ -66,7 +68,7 @@ repos:
         entry: cargo test --all-features --all-targets
         language: system
         pass_filenames: false
-        stages: [push]
+        stages: [pre-push]
 
   - repo: https://github.com/crate-ci/typos
     rev: v1.41.0

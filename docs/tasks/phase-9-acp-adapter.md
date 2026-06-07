@@ -34,8 +34,8 @@ Phase 9 delivers local ACP-based execution for authenticated products:
 - launch or connect to ACP servers using provider manifest metadata
 - translate ACP session output into existing OpenDaemon task events
 - persist normalized ACP task events through the existing event store
-- bridge ACP permission requests into Phase 7
-  `provider.permission_requested` events
+- bridge ACP permission requests into Phase 7 `provider.permission_requested`
+  events
 - bridge authenticated product permission responses back into the live ACP
   session when the protocol requires a decision
 - support resumable ACP sessions when the provider exposes a stable session
@@ -88,10 +88,10 @@ plane, not an HTTP upload adapter, and not a redesign of the product-facing API.
   `process.stderr` rather than raw protocol frames.
 - ACP lifecycle events do not break the existing SSE replay contract based on
   `task_events.sequence`.
-- ACP permission requests persist as
-  `provider.permission_requested` task events.
-- Authenticated product permission responses on
-  `POST /v1/tasks/:task_id/events` can resolve a live ACP permission request.
+- ACP permission requests persist as `provider.permission_requested` task
+  events.
+- Authenticated product permission responses on `POST /v1/tasks/:task_id/events`
+  can resolve a live ACP permission request.
 - ACP providers that require a permission decision do not hang indefinitely when
   a deny or approve decision is provided.
 - ACP providers that do not support permission responses fail with a stable
@@ -226,9 +226,9 @@ Expected behavior:
 - ACP execution still produces the existing `RuntimeExecutionOutcome`.
 - ACP cancellation still returns the existing `RuntimeCancelOutcome`.
 
-Phase 9 should not redesign the runtime adapter trait just for ACP. If ACP
-needs extra internal context, add it behind the adapter boundary rather than
-changing the product-facing task contract.
+Phase 9 should not redesign the runtime adapter trait just for ACP. If ACP needs
+extra internal context, add it behind the adapter boundary rather than changing
+the product-facing task contract.
 
 ## ACP Session Model
 
@@ -332,8 +332,7 @@ Phase 9 makes ACP the first runtime path that uses it in production.
 
 Requirements:
 
-- ACP permission prompts must normalize into
-  `provider.permission_requested`
+- ACP permission prompts must normalize into `provider.permission_requested`
 - the request record must persist through the existing pending-permission store
 - a live ACP session waiting for a decision must be linked to the persisted
   request ID

@@ -4,8 +4,8 @@
 
 Support remote products and multiple machines by adding an optional control
 plane connection for OpenDaemon, plus the first constrained remote HTTP
-execution slice, while keeping local directory grants, workspace policy,
-product scopes, and runtime execution ownership inside the daemon.
+execution slice, while keeping local directory grants, workspace policy, product
+scopes, and runtime execution ownership inside the daemon.
 
 Phase 10 builds on Phase 9. It does not redesign local product auth, task
 storage, SSE event replay, scheduler ownership, CLI execution, or ACP session
@@ -48,8 +48,8 @@ execution path:
   adapter
 - persist explicit metadata that code or workspace content was sent to a remote
   provider
-- preserve existing Phase 8 product auth and Phase 9 permission/event
-  boundaries for locally created tasks
+- preserve existing Phase 8 product auth and Phase 9 permission/event boundaries
+  for locally created tasks
 - quality gates passing
 
 Phase 10 is the remote-control and remote-execution bridge. It is not a full
@@ -115,8 +115,8 @@ management phase.
 - Callback delivery is idempotent for repeated terminal updates.
 - Control-plane protocol authentication uses daemon credentials and task-scoped
   credentials without exposing local product tokens.
-- `integration_type = "http"` can be selected by the runtime adapter when
-  policy allows it.
+- `integration_type = "http"` can be selected by the runtime adapter when policy
+  allows it.
 - HTTP providers remain rejected with a stable error when remote-execution
   policy gates are not all satisfied.
 - Remote execution is allowed only when:
@@ -133,8 +133,8 @@ management phase.
   or unrelated local secrets to provider endpoints.
 - Existing local CLI and ACP execution behavior remains stable.
 - Existing local task create/get/list/cancel/events APIs remain stable.
-- Existing ownership, directory, workspace, and permission rules remain
-  enforced by OpenDaemon.
+- Existing ownership, directory, workspace, and permission rules remain enforced
+  by OpenDaemon.
 - Quality gates pass.
 
 ## Non-Goals
@@ -199,8 +199,8 @@ Requirements:
 - first registration returns or confirms a stable `daemon_id`
 - repeated registration for the same local daemon must be idempotent or
   explicitly resumable
-- registration must include enough metadata for the control plane to route
-  tasks safely:
+- registration must include enough metadata for the control plane to route tasks
+  safely:
   - daemon version
   - platform information
   - runtime inventory summary
@@ -312,8 +312,7 @@ Requirements:
 - any missing policy gate must fail closed
 - failure should use a stable policy or adapter error rather than a transport
   error
-- remote-execution policy checks happen before any workspace packaging or
-  upload
+- remote-execution policy checks happen before any workspace packaging or upload
 - policy enforcement belongs to OpenDaemon, not provider manifests alone
 
 ### Data-Boundary Requirements
@@ -549,25 +548,25 @@ Phase 10 is complete only when these pass:
 - `cargo test -- --test-threads=1`
 
 If control-plane integration tests need a fake websocket server or fake remote
-HTTP provider, keep them repository-local and deterministic. Default CI must
-not require an external control plane or third-party provider account.
+HTTP provider, keep them repository-local and deterministic. Default CI must not
+require an external control plane or third-party provider account.
 
 ## Acceptance Checklist
 
 - [ ] Daemon registration exists with stable identity semantics.
 - [ ] Control-plane liveness is maintained through heartbeat or websocket
-  keepalive.
+      keepalive.
 - [ ] Reconnect does not lose durable local task state.
 - [ ] Runtime online/offline state can be published to the control plane.
 - [ ] Remotely dispatched tasks use the existing local scheduler and task
-  lifecycle.
+      lifecycle.
 - [ ] Claim/start/complete/fail/cancelled callbacks are idempotent.
 - [ ] Daemon credentials are distinct from local product credentials.
 - [ ] Task tokens are scoped to one remote task lifecycle.
 - [ ] `integration_type = "http"` can execute only when every remote-execution
-  policy gate is satisfied.
+      policy gate is satisfied.
 - [ ] Remote execution persists explicit metadata that code or workspace content
-  was sent to a remote provider.
+      was sent to a remote provider.
 - [ ] Remote execution never forwards OpenDaemon auth credentials to providers.
 - [ ] Existing CLI and ACP behavior remains stable.
 - [ ] Existing local task APIs remain stable.
@@ -584,5 +583,5 @@ mixing desktop concerns into the daemon core:
 - local directory and workspace boundaries remain enforced by the daemon
 
 Phase 11 can build desktop surfaces for grants, profiles, runtime status, task
-history, and permission-response workflows on top of these boundaries instead
-of reopening control-plane or remote-execution policy design again.
+history, and permission-response workflows on top of these boundaries instead of
+reopening control-plane or remote-execution policy design again.

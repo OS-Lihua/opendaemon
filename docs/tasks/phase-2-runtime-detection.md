@@ -558,7 +558,7 @@ Acceptance:
 - named `version` regex capture is parsed
 - first regex capture fallback is parsed
 - no-regex output fallback is parsed
-- unparseable version output returns `version_parse_failed`
+- unparsable version output returns `version_parse_failed`
 - empty `version_args` skips the command and returns `available` with
   `version = null`
 
@@ -716,14 +716,13 @@ print a version string that matches `detect.version_regex`.
 - [ ] Runtime API responses are sorted by provider ID.
 - [ ] Runtime API responses include executable path and version when available.
 - [ ] Runtime API responses do not include secrets, grants, task counts, or
-  capacity claims.
+      capacity claims.
 - [ ] Provider API responses remain manifest-only.
-- [ ] Fake command tests cover success, missing command, parse failure,
-  non-zero exit, and timeout.
+- [ ] Fake command tests cover success, missing command, parse failure, non-zero
+      exit, and timeout.
 - [ ] Tests do not require real provider CLIs.
 - [ ] `cargo fmt --all -- --check` passes.
-- [ ] `cargo clippy --tests --all-targets --all-features -- -D warnings`
-  passes.
+- [ ] `cargo clippy --tests --all-targets --all-features -- -D warnings` passes.
 - [ ] `cargo test --all-features --all-targets` passes.
 - [ ] `just registry-check` passes.
 

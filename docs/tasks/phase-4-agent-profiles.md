@@ -955,8 +955,8 @@ Expected behavior:
 - [x] `PATCH /v1/agents/:agent_id` exists.
 - [x] `DELETE /v1/agents/:agent_id` exists.
 - [x] Agent API returns stable error JSON.
-- [x] Agent API responses exclude secrets, runtime status, directory paths,
-  task state, prompts, and capacity claims.
+- [x] Agent API responses exclude secrets, runtime status, directory paths, task
+      state, prompts, and capacity claims.
 - [x] Directory grant creation validates known Agent Profiles.
 - [x] Directory API behavior remains stable.
 - [x] Provider API behavior remains stable.
@@ -965,8 +965,7 @@ Expected behavior:
 - [x] No provider task execution is added.
 - [x] No worktrees are created.
 - [x] `cargo fmt --all -- --check` passes.
-- [x] `cargo clippy --tests --all-targets --all-features -- -D warnings`
-  passes.
+- [x] `cargo clippy --tests --all-targets --all-features -- -D warnings` passes.
 - [x] `cargo test --all-features --all-targets` passes.
 - [x] `just registry-check` passes.
 

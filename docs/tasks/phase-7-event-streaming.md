@@ -3,8 +3,8 @@
 ## Goal
 
 Expose the persisted task event stream to products through Server-Sent Events
-(SSE), with ordered replay, reconnect-from-cursor behavior, idle heartbeats,
-and a small permission-response API for providers that require an explicit user
+(SSE), with ordered replay, reconnect-from-cursor behavior, idle heartbeats, and
+a small permission-response API for providers that require an explicit user
 decision.
 
 Phase 7 builds on Phase 6. It does not redesign task storage or runtime
@@ -42,10 +42,9 @@ Phase 7 delivers local product-facing event observation behavior:
   API behavior
 - quality gates passing
 
-Phase 7 uses the existing persisted task event log from Phase 5 and Phase 6.
-It may extend task-event-related storage for permission request state, but it
-must not replace the existing `task_events(task_id, sequence)` ordering
-contract.
+Phase 7 uses the existing persisted task event log from Phase 5 and Phase 6. It
+may extend task-event-related storage for permission request state, but it must
+not replace the existing `task_events(task_id, sequence)` ordering contract.
 
 ## Inputs
 
@@ -330,8 +329,8 @@ tests.
 ### Goal
 
 Some provider protocols can pause task execution and ask the product to approve
-or deny an operation. Phase 7 must normalize that interaction into the same
-task event stream without exposing provider-specific protocol details.
+or deny an operation. Phase 7 must normalize that interaction into the same task
+event stream without exposing provider-specific protocol details.
 
 Local CLI providers do not need to emit permission requests in Phase 7. The
 contract must exist now so Phase 8 ACP and later adapters can use it without
@@ -393,7 +392,8 @@ Rules:
 
 - only one terminal decision is allowed per `request_id`
 - repeated identical responses are idempotent
-- conflicting repeated responses return `409 permission_request_already_resolved`
+- conflicting repeated responses return
+  `409 permission_request_already_resolved`
 - the decision event is persisted before the adapter-facing response future is
   resolved
 
@@ -510,8 +510,8 @@ Requirements:
 
 - creation of `provider.permission_requested` and insertion of the pending
   request row must be atomic
-- resolution of a pending request and insertion of
-  `provider.permission_decided` must be atomic
+- resolution of a pending request and insertion of `provider.permission_decided`
+  must be atomic
 - repeated identical decisions must return the already-resolved state without
   duplicating task events
 - no store operation may expose raw SQLite errors directly through the API
@@ -621,7 +621,8 @@ Add focused tests for:
 
 ## Acceptance Checklist
 
-- [ ] Products can connect before task execution starts and observe later events.
+- [ ] Products can connect before task execution starts and observe later
+      events.
 - [ ] Products can connect after task completion and replay the full history.
 - [ ] Events are emitted in ascending per-task sequence order.
 - [ ] Reconnecting clients can resume from a cursor.
