@@ -65,7 +65,9 @@ where
 
     tracing::info!(%bound_addr, "opendaemon daemon listening");
 
-    axum::serve(listener, api::router())
+    let state = api::AppState::from_env();
+
+    axum::serve(listener, api::router_with_state(state))
         .with_graceful_shutdown(shutdown_signal)
         .await
         .context("daemon HTTP server failed")

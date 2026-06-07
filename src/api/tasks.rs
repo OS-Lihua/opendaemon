@@ -10,6 +10,7 @@ use std::time::Duration;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{
+    product::ApiScope,
     scheduler::service::{SchedulerService, TaskValidationError},
     security::directory::{DirectoryCapability, WorkspaceMode},
     store::tasks::TaskFilters,
@@ -21,7 +22,7 @@ use crate::{
     },
 };
 
-use super::{AppState, ErrorBody, ErrorResponse};
+use super::{AppState, AuthError, ErrorBody, ErrorResponse, ProductAuth};
 
 pub type TaskResponse = Task;
 
@@ -82,11 +83,16 @@ pub struct TaskPermissionResponse {
 }
 
 pub async fn list(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Query(query): Query<TaskListQuery>,
 ) -> Result<Json<TaskListResponse>, ApiError> {
+    auth.require_scope(ApiScope::TasksRead)?;
+    if let Some(owner_product_id) = &query.owner_product_id {
+        auth.ensure_product(owner_product_id)?;
+    }
     let tasks = state.task_store().list(TaskFilters {
-        owner_product_id: query.owner_product_id,
+        owner_product_id: Some(auth.product_id().to_owned()),
         agent_id: query.agent_id,
         directory_id: query.directory_id,
         status: query.status,
@@ -96,9 +102,12 @@ pub async fn list(
 }
 
 pub async fn create(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Json(request): Json<CreateTaskRequest>,
 ) -> Result<(StatusCode, Json<SingleTaskResponse>), ApiError> {
+    auth.require_scope(ApiScope::TasksCreate)?;
+    auth.ensure_product(&request.owner_product_id)?;
     let service = scheduler_service(&state);
     let task = service.enqueue_task(request.into())?;
 
@@ -106,29 +115,40 @@ pub async fn create(
 }
 
 pub async fn get(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(task_id): Path<String>,
 ) -> Result<Json<SingleTaskResponse>, ApiError> {
     let task = state.task_store().get(&task_id)?;
+    auth.require_scope(ApiScope::TasksRead)?;
+    auth.ensure_product(&task.owner_product_id)?;
 
     Ok(Json(SingleTaskResponse { task }))
 }
 
 pub async fn cancel(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(task_id): Path<String>,
 ) -> Result<Json<SingleTaskResponse>, ApiError> {
+    auth.require_scope(ApiScope::TasksCancel)?;
+    let current = state.task_store().get(&task_id)?;
+    auth.ensure_product(&current.owner_product_id)?;
     let task = scheduler_service(&state).cancel_task(&task_id)?;
 
     Ok(Json(SingleTaskResponse { task }))
 }
 
 pub async fn events(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(task_id): Path<String>,
     Query(query): Query<TaskEventsQuery>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
+    auth.require_scope(ApiScope::TasksRead)?;
+    let task = state.task_store().get(&task_id)?;
+    auth.ensure_product(&task.owner_product_id)?;
     let last_event_id = headers
         .get("last-event-id")
         .and_then(|value| value.to_str().ok());
@@ -158,10 +178,14 @@ pub async fn events(
 }
 
 pub async fn post_event(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(task_id): Path<String>,
     Json(request): Json<TaskEventRequest>,
 ) -> Result<Json<TaskPermissionResponse>, ApiError> {
+    auth.require_scope(ApiScope::TasksRead)?;
+    let task = state.task_store().get(&task_id)?;
+    auth.ensure_product(&task.owner_product_id)?;
     if request.event_type != "provider.permission_response" {
         return Err(ApiError::TaskEvents(
             TaskEventServiceError::InvalidEventRequest,
@@ -222,8 +246,15 @@ impl From<CreateTaskRequest> for CreateTask {
 
 #[derive(Debug)]
 pub enum ApiError {
+    Auth(AuthError),
     Task(TaskValidationError),
     TaskEvents(TaskEventServiceError),
+}
+
+impl From<AuthError> for ApiError {
+    fn from(error: AuthError) -> Self {
+        Self::Auth(error)
+    }
 }
 
 impl From<TaskValidationError> for ApiError {
@@ -247,6 +278,7 @@ impl From<TaskEventServiceError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Auth(error) => (error.status(), error.code(), error.message().to_owned()),
             Self::Task(error) => task_error_response(error),
             Self::TaskEvents(error) => task_event_error_response(error),
         };

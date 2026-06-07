@@ -39,6 +39,20 @@ impl Default for DaemonConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AuthConfig {
+    pub bootstrap_token: Option<String>,
+}
+
+impl AuthConfig {
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self {
+            bootstrap_token: std::env::var("OPENDAEMON_BOOTSTRAP_TOKEN").ok(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeDetectionConfig {
     pub timeout: Duration,

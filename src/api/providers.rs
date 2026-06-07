@@ -8,7 +8,9 @@ use serde::Serialize;
 
 use crate::registry::{IntegrationType, ProviderManifest, ProviderStatus};
 
-use super::AppState;
+use crate::product::ApiScope;
+
+use super::{AppState, AuthError, ProductAuth};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ProviderListResponse {
@@ -41,7 +43,11 @@ pub struct ErrorBody {
     pub message: String,
 }
 
-pub async fn list(State(state): State<AppState>) -> Result<Json<ProviderListResponse>, ApiError> {
+pub async fn list(
+    auth: ProductAuth,
+    State(state): State<AppState>,
+) -> Result<Json<ProviderListResponse>, ApiError> {
+    auth.require_scope(ApiScope::ProvidersRead)?;
     let registry = state.load_registry()?;
     let providers = registry
         .providers()
@@ -53,9 +59,11 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<ProviderListResp
 }
 
 pub async fn get(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(provider_id): Path<String>,
 ) -> Result<Json<SingleProviderResponse>, ApiError> {
+    auth.require_scope(ApiScope::ProvidersRead)?;
     let registry = state.load_registry()?;
     let provider = registry
         .get(&provider_id)
@@ -83,8 +91,15 @@ impl ProviderResponse {
 
 #[derive(Debug)]
 pub enum ApiError {
+    Auth(AuthError),
     ProviderNotFound,
     Registry(anyhow::Error),
+}
+
+impl From<AuthError> for ApiError {
+    fn from(error: AuthError) -> Self {
+        Self::Auth(error)
+    }
 }
 
 impl From<anyhow::Error> for ApiError {
@@ -96,6 +111,7 @@ impl From<anyhow::Error> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Auth(error) => (error.status(), error.code(), error.message().to_owned()),
             Self::ProviderNotFound => (
                 StatusCode::NOT_FOUND,
                 "provider_not_found",

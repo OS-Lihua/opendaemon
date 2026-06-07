@@ -2,6 +2,7 @@ pub mod agent;
 pub mod api;
 pub mod cli;
 pub mod config;
+pub mod product;
 pub mod registry;
 pub mod runtime;
 pub mod scheduler;

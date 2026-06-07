@@ -1013,7 +1013,32 @@ Acceptance criteria:
 - reconnecting clients can resume from a cursor
 - products can build their own approval UI from provider permission events
 
-### Phase 8: ACP Adapter
+### Phase 8: Product Authentication
+
+Goal: make the local API safe for multiple products.
+
+Tasks:
+
+- add local API tokens
+- add a bootstrap administration token for local product registration and token
+  issuance
+- add product registration
+- add scopes
+- bind server to `127.0.0.1` by default
+- document reverse proxy and remote access risks
+- enforce product-scoped Agent Profile, Directory Grant, and Task access
+- require explicit `directories:direct` scope for direct-directory operations
+- ensure product and bootstrap credentials are never passed to child agents
+
+Acceptance criteria:
+
+- unauthorized requests are rejected
+- products can only use scopes they were granted
+- one product cannot read or mutate another product's resources
+- direct-directory operations require explicit direct scope
+- bootstrap credentials stay limited to product-management routes
+
+### Phase 9: ACP Adapter
 
 Goal: make Agent Client Protocol a first-class integration path.
 
@@ -1032,27 +1057,6 @@ Acceptance criteria:
 - ACP task events normalize into the same product-facing event stream
 - permission behavior follows Agent Profile provider config and explicit
   product responses when the protocol requires a response
-
-### Phase 9: Product Integration Hardening
-
-Goal: make the local API safe for multiple products.
-
-Tasks:
-
-- add local API tokens
-- add product registration
-- add scopes
-- add audit log
-- add rate limits
-- bind server to `127.0.0.1` by default
-- document reverse proxy and remote access risks
-- support product-scoped Agent Profile creation
-
-Acceptance criteria:
-
-- unauthorized requests are rejected
-- products can only use scopes they were granted
-- audit log records task creation, cancellation, and directory access
 
 ### Phase 10: Control Plane
 

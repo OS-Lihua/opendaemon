@@ -11,10 +11,11 @@ use crate::{
     agent::profile::{
         AgentProfile, AgentProfileError, CreateAgentProfile, ExecutionPolicy, ProviderConfig,
     },
+    product::ApiScope,
     store::agent_profiles::{AgentProfileFilters, AgentStoreError, PatchAgentProfile},
 };
 
-use super::{AppState, ErrorBody, ErrorResponse};
+use super::{AppState, AuthError, ErrorBody, ErrorResponse, ProductAuth};
 
 pub type AgentResponse = AgentProfile;
 
@@ -59,11 +60,16 @@ pub struct PatchAgentRequest {
 }
 
 pub async fn list(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Query(query): Query<AgentListQuery>,
 ) -> Result<Json<AgentListResponse>, ApiError> {
+    auth.require_scope(ApiScope::AgentsRead)?;
+    if let Some(owner_product_id) = &query.owner_product_id {
+        auth.ensure_product(owner_product_id)?;
+    }
     let agents = state.agent_profile_store().list(AgentProfileFilters {
-        owner_product_id: query.owner_product_id,
+        owner_product_id: Some(auth.product_id().to_owned()),
         provider_id: query.provider_id,
     })?;
 
@@ -71,9 +77,12 @@ pub async fn list(
 }
 
 pub async fn create(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Json(request): Json<CreateAgentRequest>,
 ) -> Result<(StatusCode, Json<SingleAgentResponse>), ApiError> {
+    auth.require_scope(ApiScope::AgentsWrite)?;
+    auth.ensure_product(&request.owner_product_id)?;
     let input = CreateAgentProfile::from(request);
     validate_against_registry(&state, &input)?;
     let agent = state.agent_profile_store().create(input)?;
@@ -82,23 +91,29 @@ pub async fn create(
 }
 
 pub async fn get(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<Json<SingleAgentResponse>, ApiError> {
     let agent = state.agent_profile_store().get(&agent_id)?;
+    auth.require_scope(ApiScope::AgentsRead)?;
+    auth.ensure_product(&agent.owner_product_id)?;
 
     Ok(Json(SingleAgentResponse { agent }))
 }
 
 pub async fn patch(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Json<SingleAgentResponse>, ApiError> {
+    auth.require_scope(ApiScope::AgentsWrite)?;
     reject_immutable_fields(&body)?;
     let request: PatchAgentRequest = serde_json::from_value(body)
         .map_err(|_| ApiError::Profile(AgentProfileError::InvalidAgentProfile))?;
     let current = state.agent_profile_store().get(&agent_id)?;
+    auth.ensure_product(&current.owner_product_id)?;
     let validation_input = CreateAgentProfile {
         id: current.id.clone(),
         name: request.name.clone().unwrap_or_else(|| current.name.clone()),
@@ -133,9 +148,13 @@ pub async fn patch(
 }
 
 pub async fn delete(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    auth.require_scope(ApiScope::AgentsWrite)?;
+    let current = state.agent_profile_store().get(&agent_id)?;
+    auth.ensure_product(&current.owner_product_id)?;
     state.agent_profile_store().delete(&agent_id)?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -195,9 +214,16 @@ impl From<PatchAgentRequest> for PatchAgentProfile {
 
 #[derive(Debug)]
 pub enum ApiError {
+    Auth(AuthError),
     Profile(AgentProfileError),
     Store(anyhow::Error),
     Registry(anyhow::Error),
+}
+
+impl From<AuthError> for ApiError {
+    fn from(error: AuthError) -> Self {
+        Self::Auth(error)
+    }
 }
 
 impl From<AgentStoreError> for ApiError {
@@ -212,6 +238,7 @@ impl From<AgentStoreError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Auth(error) => (error.status(), error.code(), error.message().to_owned()),
             Self::Profile(error) => (
                 status_for_profile_error(&error),
                 error.code(),

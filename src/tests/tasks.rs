@@ -14,10 +14,12 @@ use tokio::time::timeout;
 use crate::{
     agent::profile::{CreateAgentProfile, ExecutionPolicy, ProviderConfig},
     api::{
-        AppState, task_cancel, task_create, task_events, task_get, task_list, task_post_event,
+        AppState, ProductAuth, ProductAuthContext, task_cancel, task_create, task_events, task_get,
+        task_list, task_post_event,
         tasks::{CreateTaskRequest, TaskEventRequest, TaskEventsQuery, TaskListQuery},
     },
-    config::{RuntimeDetectionConfig, SchedulerConfig, StoreConfig},
+    config::{AuthConfig, RuntimeDetectionConfig, SchedulerConfig, StoreConfig},
+    product::ApiScope,
     runtime::store::RuntimeStore,
     scheduler::{
         locks::{LockDecision, LockRequest},
@@ -30,6 +32,7 @@ use crate::{
     store::{
         agent_profiles::AgentProfileStore,
         directory_grants::{CreateDirectoryGrant, DirectoryGrantStore},
+        products::ProductStore,
         tasks::{TaskFilters, TaskStore},
     },
     task::{
@@ -660,8 +663,17 @@ async fn task_api_creates_lists_gets_and_cancels_tasks() {
     let temp_dir = TempDir::new();
     let state = fixture_state(temp_dir.path(), false);
     let grant = create_fixture_grant(temp_dir.path(), "product", "agent", true, false);
+    let auth = product_auth(
+        "product",
+        &[
+            ApiScope::TasksRead,
+            ApiScope::TasksCreate,
+            ApiScope::TasksCancel,
+        ],
+    );
 
     let initial = task_list(
+        auth.clone(),
         State(state.clone()),
         Query(TaskListQuery {
             owner_product_id: None,
@@ -676,6 +688,7 @@ async fn task_api_creates_lists_gets_and_cancels_tasks() {
     assert_eq!(initial.tasks, vec![]);
 
     let created = task_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateTaskRequest>(json!({
@@ -702,14 +715,19 @@ async fn task_api_creates_lists_gets_and_cancels_tasks() {
     assert!(!body.contains("secret"));
     assert!(!body.contains("token"));
 
-    let fetched = task_get(State(state.clone()), AxumPath(task.id.clone()))
-        .await
-        .unwrap()
-        .0
-        .task;
+    let fetched = task_get(
+        auth.clone(),
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+    )
+    .await
+    .unwrap()
+    .0
+    .task;
     assert_eq!(fetched, task);
 
     let filtered = task_list(
+        auth.clone(),
         State(state.clone()),
         Query(TaskListQuery {
             owner_product_id: Some("product".to_owned()),
@@ -723,14 +741,18 @@ async fn task_api_creates_lists_gets_and_cancels_tasks() {
     .0;
     assert_eq!(filtered.tasks, vec![task.clone()]);
 
-    let cancelled = task_cancel(State(state.clone()), AxumPath(task.id.clone()))
-        .await
-        .unwrap()
-        .0
-        .task;
+    let cancelled = task_cancel(
+        auth.clone(),
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+    )
+    .await
+    .unwrap()
+    .0
+    .task;
     assert_eq!(cancelled.status, TaskStatus::Cancelled);
 
-    let error = task_get(State(state), AxumPath("missing".to_owned()))
+    let error = task_get(auth, State(state), AxumPath("missing".to_owned()))
         .await
         .unwrap_err();
     assert_error(error, StatusCode::NOT_FOUND, "task_not_found").await;
@@ -741,8 +763,10 @@ async fn task_api_returns_stable_errors_for_invalid_policy() {
     let temp_dir = TempDir::new();
     let state = fixture_state(temp_dir.path(), false);
     let grant = create_fixture_grant(temp_dir.path(), "product", "agent", false, false);
+    let auth = product_auth("product", &[ApiScope::TasksCreate]);
 
     let error = task_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateTaskRequest>(json!({
@@ -762,6 +786,7 @@ async fn task_api_returns_stable_errors_for_invalid_policy() {
     assert_error(error, StatusCode::FORBIDDEN, "direct_mode_not_allowed").await;
 
     let error = task_create(
+        auth,
         State(state),
         Json(
             serde_json::from_value::<CreateTaskRequest>(json!({
@@ -787,6 +812,7 @@ async fn task_events_api_validates_cursor_and_prefers_query_cursor() {
         .task_store()
         .create(create_task_input("product", "agent", &grant.id))
         .unwrap();
+    let auth = product_auth("product", &[ApiScope::TasksRead]);
     state
         .task_store()
         .transition(&task.id, TaskStatus::WaitingDirectoryLock, None)
@@ -805,6 +831,7 @@ async fn task_events_api_validates_cursor_and_prefers_query_cursor() {
         .unwrap();
 
     let error = task_events(
+        auth.clone(),
         State(state.clone()),
         AxumPath(task.id.clone()),
         Query(TaskEventsQuery {
@@ -819,6 +846,7 @@ async fn task_events_api_validates_cursor_and_prefers_query_cursor() {
     let mut headers = HeaderMap::new();
     headers.insert("last-event-id", HeaderValue::from_static("3"));
     let response = task_events(
+        auth,
         State(state),
         AxumPath(task.id),
         Query(TaskEventsQuery {
@@ -847,6 +875,7 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
         .task_store()
         .create(create_task_input("product", "agent", &grant.id))
         .unwrap();
+    let auth = product_auth("product", &[ApiScope::TasksRead]);
     state
         .task_store()
         .record_permission_request(
@@ -865,6 +894,7 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
     let waiter = state.task_event_bus().register_waiter(&task.id, "perm_1");
 
     let response = task_post_event(
+        auth.clone(),
         State(state.clone()),
         AxumPath(task.id.clone()),
         Json(TaskEventRequest {
@@ -886,6 +916,7 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
     assert_eq!(decision.decision, PermissionDecision::Approve);
 
     let duplicate = task_post_event(
+        auth.clone(),
         State(state.clone()),
         AxumPath(task.id.clone()),
         Json(TaskEventRequest {
@@ -901,6 +932,7 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
     assert_eq!(duplicate.status, "resolved");
 
     let conflict = task_post_event(
+        auth.clone(),
         State(state.clone()),
         AxumPath(task.id.clone()),
         Json(TaskEventRequest {
@@ -920,6 +952,7 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
     .await;
 
     let missing = task_post_event(
+        auth.clone(),
         State(state.clone()),
         AxumPath(task.id.clone()),
         Json(TaskEventRequest {
@@ -939,6 +972,7 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
     .await;
 
     let invalid = task_post_event(
+        auth.clone(),
         State(state.clone()),
         AxumPath(task.id.clone()),
         Json(TaskEventRequest {
@@ -953,6 +987,7 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
     assert_error(invalid, StatusCode::BAD_REQUEST, "invalid_event_request").await;
 
     let invalid_decision = task_post_event(
+        auth,
         State(state.clone()),
         AxumPath(task.id.clone()),
         Json(
@@ -975,6 +1010,71 @@ async fn task_event_post_resolves_permission_request_and_reports_stable_errors()
     .await;
 }
 
+#[tokio::test]
+async fn task_api_enforces_product_ownership_for_reads_and_events() {
+    let temp_dir = TempDir::new();
+    let state = fixture_state(temp_dir.path(), false);
+    let grant = create_fixture_grant(temp_dir.path(), "product", "agent", false, false);
+    let task = state
+        .task_store()
+        .create(create_task_input("product", "agent", &grant.id))
+        .unwrap();
+    let task_id = task.id.clone();
+    let owner_auth = product_auth(
+        "product",
+        &[
+            ApiScope::TasksRead,
+            ApiScope::TasksCreate,
+            ApiScope::TasksCancel,
+        ],
+    );
+    let other_auth = product_auth("other", &[ApiScope::TasksRead, ApiScope::TasksCreate]);
+
+    let mismatch = task_create(
+        other_auth.clone(),
+        State(state.clone()),
+        Json(
+            serde_json::from_value::<CreateTaskRequest>(json!({
+                "owner_product_id": "product",
+                "agent_id": "agent",
+                "directory_id": grant.id,
+                "prompt": "Inspect this project."
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert_error(mismatch, StatusCode::FORBIDDEN, "product_scope_mismatch").await;
+
+    let hidden = task_get(
+        other_auth.clone(),
+        State(state.clone()),
+        AxumPath(task.id.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert_error(hidden, StatusCode::FORBIDDEN, "product_scope_mismatch").await;
+
+    let hidden_events = task_events(
+        other_auth,
+        State(state.clone()),
+        AxumPath(task_id.clone()),
+        Query(TaskEventsQuery { cursor: None }),
+        HeaderMap::new(),
+    )
+    .await
+    .unwrap_err();
+    assert_error(
+        hidden_events,
+        StatusCode::FORBIDDEN,
+        "product_scope_mismatch",
+    )
+    .await;
+
+    let visible = task_get(owner_auth, State(state), AxumPath(task_id)).await;
+    assert!(visible.is_ok());
+}
 async fn assert_error(error: crate::api::tasks::ApiError, status: StatusCode, code: &str) {
     let response = error.into_response();
     assert_eq!(response.status(), status);
@@ -1017,6 +1117,8 @@ fn fixture_state_with_scheduler_config(
         crate::registry::default_providers_dir(),
         RuntimeStore::default(),
         RuntimeDetectionConfig::default(),
+        AuthConfig::default(),
+        temp_product_store(root),
         temp_directory_store(root),
         profile_store,
         temp_task_store(root),
@@ -1094,6 +1196,18 @@ fn temp_directory_store(root: &Path) -> DirectoryGrantStore {
 
 fn temp_task_store(root: &Path) -> TaskStore {
     TaskStore::open(StoreConfig::new(root.join("opendaemon.sqlite3"))).unwrap()
+}
+
+fn temp_product_store(root: &Path) -> ProductStore {
+    ProductStore::open(StoreConfig::new(root.join("opendaemon.sqlite3"))).unwrap()
+}
+
+fn product_auth(product_id: &str, scopes: &[ApiScope]) -> ProductAuth {
+    ProductAuth(ProductAuthContext {
+        token_id: "ptok_test".to_owned(),
+        product_id: product_id.to_owned(),
+        scopes: scopes.iter().copied().collect(),
+    })
 }
 
 fn unique_name() -> String {

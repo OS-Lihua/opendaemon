@@ -15,16 +15,19 @@ use crate::{
         ProviderConfig, WorkspaceMode,
     },
     api::{
-        AppState, agent_create, agent_delete, agent_get, agent_list, agent_patch,
+        AppState, ProductAuth, ProductAuthContext, agent_create, agent_delete, agent_get,
+        agent_list, agent_patch,
         agents::{AgentListQuery, CreateAgentRequest},
         directories::CreateDirectoryGrantRequest,
         directory_create, directory_get,
     },
-    config::{RuntimeDetectionConfig, StoreConfig},
+    config::{AuthConfig, RuntimeDetectionConfig, StoreConfig},
+    product::ApiScope,
     runtime::store::RuntimeStore,
     store::{
         agent_profiles::{AgentProfileFilters, AgentProfileStore, PatchAgentProfile},
         directory_grants::DirectoryGrantStore,
+        products::ProductStore,
     },
     tests::{TempDir, temp_registry_with_provider, valid_manifest_json},
 };
@@ -309,8 +312,13 @@ fn sqlite_profile_store_persists_filters_patches_deletes_and_authorizes() {
 async fn agent_api_creates_lists_gets_patches_deletes_and_filters_profiles() {
     let temp_dir = TempDir::new();
     let state = test_state(temp_dir.path());
+    let auth = product_auth(
+        "product_example",
+        &[ApiScope::AgentsRead, ApiScope::AgentsWrite],
+    );
 
     let initial = agent_list(
+        auth.clone(),
         State(state.clone()),
         Query(AgentListQuery {
             owner_product_id: None,
@@ -323,6 +331,7 @@ async fn agent_api_creates_lists_gets_patches_deletes_and_filters_profiles() {
     assert_eq!(initial.agents, vec![]);
 
     let created = agent_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateAgentRequest>(json!({
@@ -356,14 +365,19 @@ async fn agent_api_creates_lists_gets_patches_deletes_and_filters_profiles() {
     assert!(!body.contains("secret"));
     assert!(!body.contains("capacity"));
 
-    let fetched = agent_get(State(state.clone()), AxumPath(agent.id.clone()))
-        .await
-        .unwrap()
-        .0
-        .agent;
+    let fetched = agent_get(
+        auth.clone(),
+        State(state.clone()),
+        AxumPath(agent.id.clone()),
+    )
+    .await
+    .unwrap()
+    .0
+    .agent;
     assert_eq!(fetched, agent);
 
     let patched = agent_patch(
+        auth.clone(),
         State(state.clone()),
         AxumPath(agent.id.clone()),
         Json(json!({
@@ -392,6 +406,7 @@ async fn agent_api_creates_lists_gets_patches_deletes_and_filters_profiles() {
     assert_eq!(patched.provider_config.permission_mode, "plan");
 
     let filtered = agent_list(
+        auth.clone(),
         State(state.clone()),
         Query(AgentListQuery {
             owner_product_id: Some("product_example".to_owned()),
@@ -403,12 +418,16 @@ async fn agent_api_creates_lists_gets_patches_deletes_and_filters_profiles() {
     .0;
     assert_eq!(filtered.agents, vec![patched.clone()]);
 
-    let delete_status = agent_delete(State(state.clone()), AxumPath(agent.id.clone()))
-        .await
-        .unwrap();
+    let delete_status = agent_delete(
+        auth.clone(),
+        State(state.clone()),
+        AxumPath(agent.id.clone()),
+    )
+    .await
+    .unwrap();
     assert_eq!(delete_status, StatusCode::NO_CONTENT);
 
-    let error = agent_get(State(state), AxumPath(agent.id))
+    let error = agent_get(auth, State(state), AxumPath(agent.id))
         .await
         .unwrap_err();
     let response = error.into_response();
@@ -422,8 +441,10 @@ async fn agent_api_creates_lists_gets_patches_deletes_and_filters_profiles() {
 async fn agent_api_returns_stable_errors_for_invalid_requests() {
     let temp_dir = TempDir::new();
     let state = test_state(temp_dir.path());
+    let auth = product_auth("product", &[ApiScope::AgentsWrite]);
 
     let error = agent_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateAgentRequest>(json!({
@@ -441,6 +462,7 @@ async fn agent_api_returns_stable_errors_for_invalid_requests() {
     assert_error(error, StatusCode::BAD_REQUEST, "invalid_agent_id").await;
 
     let error = agent_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateAgentRequest>(json!({
@@ -458,6 +480,7 @@ async fn agent_api_returns_stable_errors_for_invalid_requests() {
     assert_error(error, StatusCode::BAD_REQUEST, "provider_not_found").await;
 
     let error = agent_patch(
+        auth,
         State(state),
         AxumPath("missing".to_owned()),
         Json(json!({"id": "other"})),
@@ -468,12 +491,73 @@ async fn agent_api_returns_stable_errors_for_invalid_requests() {
 }
 
 #[tokio::test]
+async fn agent_api_enforces_product_ownership() {
+    let temp_dir = TempDir::new();
+    let state = test_state(temp_dir.path());
+    let owner_auth = product_auth("product_a", &[ApiScope::AgentsRead, ApiScope::AgentsWrite]);
+    let other_auth = product_auth("product_b", &[ApiScope::AgentsRead, ApiScope::AgentsWrite]);
+
+    let created = agent_create(
+        owner_auth.clone(),
+        State(state.clone()),
+        Json(
+            serde_json::from_value::<CreateAgentRequest>(json!({
+                "id": "owned-agent",
+                "name": "Owned Agent",
+                "owner_product_id": "product_a",
+                "provider_id": "codex",
+                "model": "gpt-5-codex"
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap()
+    .1
+    .0
+    .agent;
+
+    let mismatch = agent_create(
+        other_auth.clone(),
+        State(state.clone()),
+        Json(
+            serde_json::from_value::<CreateAgentRequest>(json!({
+                "id": "bad-agent",
+                "name": "Bad Agent",
+                "owner_product_id": "product_a",
+                "provider_id": "codex",
+                "model": "gpt-5-codex"
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert_error(mismatch, StatusCode::FORBIDDEN, "product_scope_mismatch").await;
+
+    let hidden = agent_get(other_auth, State(state), AxumPath(created.id))
+        .await
+        .unwrap_err();
+    assert_error(hidden, StatusCode::FORBIDDEN, "product_scope_mismatch").await;
+}
+
+#[tokio::test]
 async fn directory_grant_creation_validates_agent_profile_scope_without_embedding_profile() {
     let temp_dir = TempDir::new();
     let state = test_state(temp_dir.path());
     let project = create_project(temp_dir.path(), "project");
+    let auth = product_auth(
+        "product_example",
+        &[
+            ApiScope::AgentsWrite,
+            ApiScope::DirectoriesGrant,
+            ApiScope::DirectoriesDirect,
+            ApiScope::DirectoriesRead,
+        ],
+    );
 
     let missing_error = directory_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateDirectoryGrantRequest>(json!({
@@ -497,6 +581,7 @@ async fn directory_grant_creation_validates_agent_profile_scope_without_embeddin
     assert_eq!(json["error"]["code"], "agent_not_found");
 
     let _created = agent_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateAgentRequest>(json!({
@@ -517,6 +602,7 @@ async fn directory_grant_creation_validates_agent_profile_scope_without_embeddin
     .unwrap();
 
     let directory = directory_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateDirectoryGrantRequest>(json!({
@@ -541,10 +627,14 @@ async fn directory_grant_creation_validates_agent_profile_scope_without_embeddin
     assert!(!body.contains("provider_config"));
     assert!(!body.contains("instructions"));
 
-    agent_delete(State(state.clone()), AxumPath("frontend-fixer".to_owned()))
-        .await
-        .unwrap();
-    let still_exists = directory_get(State(state), AxumPath(directory.id))
+    agent_delete(
+        auth.clone(),
+        State(state.clone()),
+        AxumPath("frontend-fixer".to_owned()),
+    )
+    .await
+    .unwrap();
+    let still_exists = directory_get(auth, State(state), AxumPath(directory.id))
         .await
         .unwrap()
         .0
@@ -573,9 +663,23 @@ fn test_state(root: &Path) -> AppState {
         crate::registry::default_providers_dir(),
         RuntimeStore::default(),
         RuntimeDetectionConfig::default(),
+        AuthConfig::default(),
+        temp_product_store(root),
         temp_directory_store(root),
         temp_profile_store(root),
     )
+}
+
+fn temp_product_store(root: &Path) -> ProductStore {
+    ProductStore::open(StoreConfig::new(root.join("opendaemon.sqlite3"))).unwrap()
+}
+
+fn product_auth(product_id: &str, scopes: &[ApiScope]) -> ProductAuth {
+    ProductAuth(ProductAuthContext {
+        token_id: "ptok_test".to_owned(),
+        product_id: product_id.to_owned(),
+        scopes: scopes.iter().copied().collect(),
+    })
 }
 
 fn create_profile(id: &str, product_id: &str) -> CreateAgentProfile {

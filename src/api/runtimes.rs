@@ -6,9 +6,9 @@ use axum::{
 };
 use serde::Serialize;
 
-use crate::{registry::ProviderManifest, runtime};
+use crate::{product::ApiScope, registry::ProviderManifest, runtime};
 
-use super::{AppState, ErrorBody, ErrorResponse};
+use super::{AppState, AuthError, ErrorBody, ErrorResponse, ProductAuth};
 
 pub type RuntimeResponse = runtime::model::RuntimeView;
 
@@ -17,14 +17,22 @@ pub struct RuntimeListResponse {
     pub runtimes: Vec<RuntimeResponse>,
 }
 
-pub async fn list(State(state): State<AppState>) -> Result<Json<RuntimeListResponse>, ApiError> {
+pub async fn list(
+    auth: ProductAuth,
+    State(state): State<AppState>,
+) -> Result<Json<RuntimeListResponse>, ApiError> {
+    auth.require_scope(ApiScope::RuntimesRead)?;
     let providers = load_provider_manifests(&state)?;
     let runtimes = state.runtime_store().list_for_providers(&providers).await;
 
     Ok(Json(RuntimeListResponse { runtimes }))
 }
 
-pub async fn detect(State(state): State<AppState>) -> Result<Json<RuntimeListResponse>, ApiError> {
+pub async fn detect(
+    auth: ProductAuth,
+    State(state): State<AppState>,
+) -> Result<Json<RuntimeListResponse>, ApiError> {
+    auth.require_scope(ApiScope::RuntimesRead)?;
     let providers = load_provider_manifests(&state)?;
     let runtimes =
         runtime::detect::detect_providers(&providers, state.runtime_detection_config()).await;
@@ -46,7 +54,14 @@ fn load_provider_manifests(state: &AppState) -> Result<Vec<ProviderManifest>, Ap
 
 #[derive(Debug)]
 pub enum ApiError {
+    Auth(AuthError),
     Registry(anyhow::Error),
+}
+
+impl From<AuthError> for ApiError {
+    fn from(error: AuthError) -> Self {
+        Self::Auth(error)
+    }
 }
 
 impl From<anyhow::Error> for ApiError {
@@ -58,6 +73,7 @@ impl From<anyhow::Error> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Auth(error) => (error.status(), error.code(), error.message().to_owned()),
             Self::Registry(error) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "registry_error",

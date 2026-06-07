@@ -6,15 +6,22 @@ use axum::{
 };
 
 pub(crate) mod agents;
+pub(crate) mod auth;
 pub(crate) mod directories;
 mod health;
+pub(crate) mod products;
 mod providers;
 mod runtimes;
 pub(crate) mod tasks;
 
 pub use agents::{AgentListResponse, AgentResponse, SingleAgentResponse};
+pub use auth::{AuthError, BootstrapAuth, ProductAuth, ProductAuthContext};
 pub use directories::{DirectoryListResponse, DirectoryResponse, SingleDirectoryResponse};
 pub use health::{HealthResponse, health};
+pub use products::{
+    CreatedProductTokenResponse, ProductListResponse, ProductTokenListResponse,
+    SingleProductResponse,
+};
 pub use providers::{
     ErrorBody, ErrorResponse, ProviderListResponse, ProviderResponse, SingleProviderResponse,
 };
@@ -22,11 +29,12 @@ pub use runtimes::{RuntimeListResponse, RuntimeResponse};
 pub use tasks::{SingleTaskResponse, TaskListResponse, TaskResponse};
 
 use crate::{
-    config::{RuntimeDetectionConfig, SchedulerConfig, StoreConfig},
+    config::{AuthConfig, RuntimeDetectionConfig, SchedulerConfig, StoreConfig},
     registry::{self, ProviderRegistry},
     runtime::store::RuntimeStore,
     store::{
-        agent_profiles::AgentProfileStore, directory_grants::DirectoryGrantStore, tasks::TaskStore,
+        agent_profiles::AgentProfileStore, directory_grants::DirectoryGrantStore,
+        products::ProductStore, tasks::TaskStore,
     },
     task::service::{SharedTaskEventBus, TaskEventBus, TaskEventService},
 };
@@ -58,6 +66,8 @@ pub struct AppState {
     providers_dir: PathBuf,
     runtime_store: RuntimeStore,
     runtime_detection_config: RuntimeDetectionConfig,
+    auth_config: AuthConfig,
+    product_store: ProductStore,
     directory_grant_store: DirectoryGrantStore,
     agent_profile_store: AgentProfileStore,
     task_store: TaskStore,
@@ -66,6 +76,21 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self::with_task_store(
+            registry::default_providers_dir(),
+            RuntimeStore::default(),
+            RuntimeDetectionConfig::default(),
+            AuthConfig::from_env(),
+            ProductStore::configured(StoreConfig::default()),
+            DirectoryGrantStore::configured(StoreConfig::default()),
+            AgentProfileStore::configured(StoreConfig::default()),
+            TaskStore::configured(StoreConfig::default()),
+            SchedulerConfig::default(),
+        )
+    }
+
     #[must_use]
     pub fn new(
         providers_dir: PathBuf,
@@ -76,6 +101,8 @@ impl AppState {
             providers_dir,
             runtime_store,
             runtime_detection_config,
+            AuthConfig::default(),
+            ProductStore::configured(StoreConfig::default()),
             DirectoryGrantStore::configured(StoreConfig::default()),
         )
     }
@@ -85,12 +112,16 @@ impl AppState {
         providers_dir: PathBuf,
         runtime_store: RuntimeStore,
         runtime_detection_config: RuntimeDetectionConfig,
+        auth_config: AuthConfig,
+        product_store: ProductStore,
         directory_grant_store: DirectoryGrantStore,
     ) -> Self {
         Self::with_task_store(
             providers_dir,
             runtime_store,
             runtime_detection_config,
+            auth_config,
+            product_store,
             directory_grant_store,
             AgentProfileStore::configured(StoreConfig::default()),
             TaskStore::configured(StoreConfig::default()),
@@ -103,6 +134,8 @@ impl AppState {
         providers_dir: PathBuf,
         runtime_store: RuntimeStore,
         runtime_detection_config: RuntimeDetectionConfig,
+        auth_config: AuthConfig,
+        product_store: ProductStore,
         directory_grant_store: DirectoryGrantStore,
         agent_profile_store: AgentProfileStore,
     ) -> Self {
@@ -110,6 +143,8 @@ impl AppState {
             providers_dir,
             runtime_store,
             runtime_detection_config,
+            auth_config,
+            product_store,
             directory_grant_store,
             agent_profile_store,
             TaskStore::configured(StoreConfig::default()),
@@ -118,10 +153,13 @@ impl AppState {
     }
 
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn with_task_store(
         providers_dir: PathBuf,
         runtime_store: RuntimeStore,
         runtime_detection_config: RuntimeDetectionConfig,
+        auth_config: AuthConfig,
+        product_store: ProductStore,
         directory_grant_store: DirectoryGrantStore,
         agent_profile_store: AgentProfileStore,
         task_store: TaskStore,
@@ -132,6 +170,8 @@ impl AppState {
             providers_dir,
             runtime_store,
             runtime_detection_config,
+            auth_config,
+            product_store,
             directory_grant_store,
             agent_profile_store,
             task_store: task_store.with_event_bus(task_event_bus.clone()),
@@ -157,6 +197,16 @@ impl AppState {
     #[must_use]
     pub fn directory_grant_store(&self) -> &DirectoryGrantStore {
         &self.directory_grant_store
+    }
+
+    #[must_use]
+    pub fn product_store(&self) -> &ProductStore {
+        &self.product_store
+    }
+
+    #[must_use]
+    pub fn auth_config(&self) -> &AuthConfig {
+        &self.auth_config
     }
 
     #[must_use]
@@ -191,15 +241,7 @@ impl AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        Self::with_task_store(
-            registry::default_providers_dir(),
-            RuntimeStore::default(),
-            RuntimeDetectionConfig::default(),
-            DirectoryGrantStore::configured(StoreConfig::default()),
-            AgentProfileStore::configured(StoreConfig::default()),
-            TaskStore::configured(StoreConfig::default()),
-            SchedulerConfig::default(),
-        )
+        Self::from_env()
     }
 }
 
@@ -210,6 +252,19 @@ pub fn router() -> Router {
 pub fn router_with_state(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/v1/products", get(products::list).post(products::create))
+        .route(
+            "/v1/products/{product_id}",
+            get(products::get).patch(products::patch),
+        )
+        .route(
+            "/v1/products/{product_id}/tokens",
+            get(products::list_tokens).post(products::create_token),
+        )
+        .route(
+            "/v1/products/{product_id}/tokens/{token_id}",
+            axum::routing::delete(products::revoke_token),
+        )
         .route("/v1/providers", get(providers::list))
         .route("/v1/providers/{provider_id}", get(providers::get))
         .route("/v1/runtimes", get(runtimes::list))

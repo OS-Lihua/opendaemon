@@ -12,11 +12,12 @@ use serde_json::{Value, json};
 use crate::{
     agent::profile::{CreateAgentProfile, ExecutionPolicy, ProviderConfig},
     api::{
-        AppState,
+        AppState, ProductAuth, ProductAuthContext,
         directories::{CreateDirectoryGrantRequest, DirectoryListQuery},
         directory_create, directory_delete, directory_get, directory_list, directory_patch,
     },
-    config::{RuntimeDetectionConfig, StoreConfig},
+    config::{AuthConfig, RuntimeDetectionConfig, StoreConfig},
+    product::ApiScope,
     runtime::store::RuntimeStore,
     security::{
         directory::{
@@ -30,6 +31,7 @@ use crate::{
         directory_grants::{
             CreateDirectoryGrant, DirectoryGrantFilters, DirectoryGrantStore, PatchDirectoryGrant,
         },
+        products::ProductStore,
     },
     tests::TempDir,
 };
@@ -331,8 +333,17 @@ async fn directory_api_lists_creates_gets_patches_and_deletes_grants() {
     let state = test_state(temp_dir.path());
     let project = create_project(temp_dir.path(), "project", false);
     create_test_agent(temp_dir.path(), "agent", "product");
+    let auth = product_auth(
+        "product",
+        &[
+            ApiScope::DirectoriesRead,
+            ApiScope::DirectoriesGrant,
+            ApiScope::DirectoriesDirect,
+        ],
+    );
 
     let initial = directory_list(
+        auth.clone(),
         State(state.clone()),
         Query(DirectoryListQuery {
             product_id: None,
@@ -345,6 +356,7 @@ async fn directory_api_lists_creates_gets_patches_and_deletes_grants() {
     assert_eq!(initial.directories, vec![]);
 
     let created = directory_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateDirectoryGrantRequest>(json!({
@@ -371,14 +383,19 @@ async fn directory_api_lists_creates_gets_patches_and_deletes_grants() {
     assert!(!body.contains("tasks"));
     assert!(!body.contains("capacity"));
 
-    let fetched = directory_get(State(state.clone()), AxumPath(directory.id.clone()))
-        .await
-        .unwrap()
-        .0
-        .directory;
+    let fetched = directory_get(
+        auth.clone(),
+        State(state.clone()),
+        AxumPath(directory.id.clone()),
+    )
+    .await
+    .unwrap()
+    .0
+    .directory;
     assert_eq!(fetched, directory);
 
     let patched = directory_patch(
+        auth.clone(),
         State(state.clone()),
         AxumPath(directory.id.clone()),
         Json(json!({
@@ -393,6 +410,7 @@ async fn directory_api_lists_creates_gets_patches_and_deletes_grants() {
     assert!(patched.capabilities.contains(&DirectoryCapability::Shell));
 
     let filtered = directory_list(
+        auth.clone(),
         State(state.clone()),
         Query(DirectoryListQuery {
             product_id: Some("product".to_owned()),
@@ -404,13 +422,17 @@ async fn directory_api_lists_creates_gets_patches_and_deletes_grants() {
     .0;
     assert_eq!(filtered.directories.len(), 1);
 
-    let delete_status = directory_delete(State(state.clone()), AxumPath(directory.id.clone()))
-        .await
-        .unwrap();
+    let delete_status = directory_delete(
+        auth.clone(),
+        State(state.clone()),
+        AxumPath(directory.id.clone()),
+    )
+    .await
+    .unwrap();
     assert_eq!(delete_status, StatusCode::NO_CONTENT);
     assert!(Path::new(&patched.path).exists());
 
-    let error = directory_get(State(state), AxumPath(directory.id))
+    let error = directory_get(auth, State(state), AxumPath(directory.id))
         .await
         .unwrap_err();
     let response = error.into_response();
@@ -425,8 +447,17 @@ async fn directory_api_returns_stable_errors_for_invalid_requests() {
     let temp_dir = TempDir::new();
     let state = test_state(temp_dir.path());
     create_test_agent(temp_dir.path(), "agent", "product");
+    let auth = product_auth(
+        "product",
+        &[
+            ApiScope::DirectoriesRead,
+            ApiScope::DirectoriesGrant,
+            ApiScope::DirectoriesDirect,
+        ],
+    );
 
     let error = directory_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateDirectoryGrantRequest>(json!({
@@ -451,6 +482,7 @@ async fn directory_api_returns_stable_errors_for_invalid_requests() {
 
     let project = create_project(temp_dir.path(), "project", false);
     let created = directory_create(
+        auth.clone(),
         State(state.clone()),
         Json(
             serde_json::from_value::<CreateDirectoryGrantRequest>(json!({
@@ -472,6 +504,7 @@ async fn directory_api_returns_stable_errors_for_invalid_requests() {
     .directory;
 
     let error = directory_patch(
+        auth,
         State(state),
         AxumPath(created.id),
         Json(json!({"path": "/tmp"})),
@@ -485,6 +518,86 @@ async fn directory_api_returns_stable_errors_for_invalid_requests() {
     assert_eq!(json["error"]["code"], "directory_authorization_failed");
 }
 
+#[tokio::test]
+async fn directory_api_enforces_product_ownership_and_direct_scope() {
+    let temp_dir = TempDir::new();
+    let state = test_state(temp_dir.path());
+    let project = create_project(temp_dir.path(), "project", false);
+    create_test_agent(temp_dir.path(), "agent", "product_a");
+    let owner_auth = product_auth(
+        "product_a",
+        &[
+            ApiScope::DirectoriesRead,
+            ApiScope::DirectoriesGrant,
+            ApiScope::DirectoriesDirect,
+        ],
+    );
+    let limited_auth = product_auth("product_a", &[ApiScope::DirectoriesGrant]);
+    let other_auth = product_auth(
+        "product_b",
+        &[
+            ApiScope::DirectoriesRead,
+            ApiScope::DirectoriesGrant,
+            ApiScope::DirectoriesDirect,
+        ],
+    );
+
+    let created = directory_create(
+        owner_auth.clone(),
+        State(state.clone()),
+        Json(
+            serde_json::from_value::<CreateDirectoryGrantRequest>(json!({
+                "product_id": "product_a",
+                "agent_id": "agent",
+                "path": project,
+                "capabilities": ["read"],
+                "workspace_modes": ["direct"],
+                "default_workspace_mode": "direct",
+                "lock_policy": "shared"
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap()
+    .1
+    .0
+    .directory;
+
+    let no_direct = directory_create(
+        limited_auth,
+        State(state.clone()),
+        Json(
+            serde_json::from_value::<CreateDirectoryGrantRequest>(json!({
+                "product_id": "product_a",
+                "agent_id": "agent",
+                "path": temp_dir.path().join("project"),
+                "capabilities": ["read"],
+                "workspace_modes": ["direct"],
+                "default_workspace_mode": "direct",
+                "lock_policy": "shared"
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap_err();
+    let response = no_direct.into_response();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "insufficient_scope");
+
+    let hidden = directory_get(other_auth, State(state), AxumPath(created.id))
+        .await
+        .unwrap_err();
+    let response = hidden.into_response();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "product_scope_mismatch");
+}
+
 fn temp_store(root: &Path) -> DirectoryGrantStore {
     DirectoryGrantStore::open(StoreConfig::new(root.join("opendaemon.sqlite3"))).unwrap()
 }
@@ -494,9 +607,23 @@ fn test_state(root: &Path) -> AppState {
         crate::registry::default_providers_dir(),
         RuntimeStore::default(),
         RuntimeDetectionConfig::default(),
+        AuthConfig::default(),
+        temp_product_store(root),
         temp_store(root),
         temp_profile_store(root),
     )
+}
+
+fn temp_product_store(root: &Path) -> ProductStore {
+    ProductStore::open(StoreConfig::new(root.join("opendaemon.sqlite3"))).unwrap()
+}
+
+fn product_auth(product_id: &str, scopes: &[ApiScope]) -> ProductAuth {
+    ProductAuth(ProductAuthContext {
+        token_id: "ptok_test".to_owned(),
+        product_id: product_id.to_owned(),
+        scopes: scopes.iter().copied().collect(),
+    })
 }
 
 fn temp_profile_store(root: &Path) -> AgentProfileStore {

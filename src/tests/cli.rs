@@ -3,6 +3,7 @@ use std::net::IpAddr;
 use clap::error::ErrorKind;
 
 use crate::{
+    api::AppState,
     cli::{Cli, Command},
     config::DaemonConfig,
 };
@@ -65,4 +66,28 @@ fn cli_parser_rejects_invalid_arguments() {
         Cli::parse_from_for_test(["opendaemon", "daemon", "--port", "invalid"]).unwrap_err();
 
     assert_eq!(error.kind(), ErrorKind::ValueValidation);
+}
+
+#[test]
+fn app_state_from_env_loads_bootstrap_token() {
+    let key = "OPENDAEMON_BOOTSTRAP_TOKEN";
+    let previous = std::env::var_os(key);
+    unsafe {
+        std::env::set_var(key, "phase8-bootstrap-test-token");
+    }
+
+    let state = AppState::from_env();
+    assert_eq!(
+        state.auth_config().bootstrap_token.as_deref(),
+        Some("phase8-bootstrap-test-token")
+    );
+
+    match previous {
+        Some(value) => unsafe {
+            std::env::set_var(key, value);
+        },
+        None => unsafe {
+            std::env::remove_var(key);
+        },
+    }
 }

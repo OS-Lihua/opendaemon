@@ -2,5 +2,6 @@
 
 pub mod agent_profiles;
 pub mod directory_grants;
+pub mod products;
 pub mod sqlite;
 pub mod tasks;

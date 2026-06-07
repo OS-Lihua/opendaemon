@@ -124,6 +124,30 @@ fn initialize_schema(connection: &Connection) -> Result<(), rusqlite::Error> {
 
         CREATE INDEX IF NOT EXISTS directory_locks_active_idx
         ON directory_locks(directory_id, status);
+
+        CREATE TABLE IF NOT EXISTS products (
+            id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS product_tokens (
+            id TEXT PRIMARY KEY,
+            product_id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            scopes_json TEXT NOT NULL,
+            token_prefix TEXT NOT NULL,
+            token_digest_hex TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT,
+            revoked_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS product_tokens_product_idx
+        ON product_tokens(product_id, revoked_at);
         "#,
     )
 }

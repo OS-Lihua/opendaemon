@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::{
     agent::profile::{AgentAuthorizationRequest, AgentProfileError},
+    product::ApiScope,
     security::directory::{
         DirectoryCapability, DirectoryGrant, DirectoryLockPolicy, WorkspaceMode,
     },
@@ -17,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{AppState, ErrorBody, ErrorResponse};
+use super::{AppState, AuthError, ErrorBody, ErrorResponse, ProductAuth};
 
 pub type DirectoryResponse = DirectoryGrant;
 
@@ -59,11 +60,16 @@ pub struct PatchDirectoryGrantRequest {
 }
 
 pub async fn list(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Query(query): Query<DirectoryListQuery>,
 ) -> Result<Json<DirectoryListResponse>, ApiError> {
+    auth.require_scope(ApiScope::DirectoriesRead)?;
+    if let Some(product_id) = &query.product_id {
+        auth.ensure_product(product_id)?;
+    }
     let directories = state.directory_grant_store().list(DirectoryGrantFilters {
-        product_id: query.product_id,
+        product_id: Some(auth.product_id().to_owned()),
         agent_id: query.agent_id,
     })?;
 
@@ -71,9 +77,17 @@ pub async fn list(
 }
 
 pub async fn create(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Json(request): Json<CreateDirectoryGrantRequest>,
 ) -> Result<(StatusCode, Json<SingleDirectoryResponse>), ApiError> {
+    auth.require_scope(ApiScope::DirectoriesGrant)?;
+    auth.ensure_product(&request.product_id)?;
+    require_direct_scope(
+        &auth,
+        &request.workspace_modes,
+        request.default_workspace_mode,
+    )?;
     state
         .agent_profile_store()
         .authorize(&AgentAuthorizationRequest {
@@ -104,22 +118,34 @@ fn agent_workspace_mode(mode: WorkspaceMode) -> crate::agent::profile::Workspace
 }
 
 pub async fn get(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(directory_id): Path<String>,
 ) -> Result<Json<SingleDirectoryResponse>, ApiError> {
     let directory = state.directory_grant_store().get(&directory_id)?;
+    auth.require_scope(ApiScope::DirectoriesRead)?;
+    auth.ensure_product(&directory.product_id)?;
 
     Ok(Json(SingleDirectoryResponse { directory }))
 }
 
 pub async fn patch(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(directory_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Json<SingleDirectoryResponse>, ApiError> {
+    auth.require_scope(ApiScope::DirectoriesGrant)?;
     reject_immutable_fields(&body)?;
     let request: PatchDirectoryGrantRequest =
         serde_json::from_value(body).map_err(|_| ApiError::BadPatch)?;
+    let current = state.directory_grant_store().get(&directory_id)?;
+    auth.ensure_product(&current.product_id)?;
+    require_direct_scope(
+        &auth,
+        &request.workspace_modes,
+        request.default_workspace_mode,
+    )?;
     let directory = state
         .directory_grant_store()
         .patch(&directory_id, request.into())?;
@@ -128,12 +154,31 @@ pub async fn patch(
 }
 
 pub async fn delete(
+    auth: ProductAuth,
     State(state): State<AppState>,
     Path(directory_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    auth.require_scope(ApiScope::DirectoriesGrant)?;
+    let current = state.directory_grant_store().get(&directory_id)?;
+    auth.ensure_product(&current.product_id)?;
     state.directory_grant_store().delete(&directory_id)?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn require_direct_scope(
+    auth: &ProductAuth,
+    workspace_modes: &Option<Vec<WorkspaceMode>>,
+    default_workspace_mode: Option<WorkspaceMode>,
+) -> Result<(), ApiError> {
+    let uses_direct = workspace_modes
+        .as_ref()
+        .is_some_and(|modes| modes.contains(&WorkspaceMode::Direct))
+        || default_workspace_mode == Some(WorkspaceMode::Direct);
+    if uses_direct {
+        auth.require_scopes(&[ApiScope::DirectoriesGrant, ApiScope::DirectoriesDirect])?;
+    }
+    Ok(())
 }
 
 fn reject_immutable_fields(body: &Value) -> Result<(), ApiError> {
@@ -182,10 +227,17 @@ impl From<PatchDirectoryGrantRequest> for PatchDirectoryGrant {
 
 #[derive(Debug)]
 pub enum ApiError {
+    Auth(AuthError),
     Directory(DirectoryStoreError),
     Agent(AgentProfileError),
     AgentStore(anyhow::Error),
     BadPatch,
+}
+
+impl From<AuthError> for ApiError {
+    fn from(error: AuthError) -> Self {
+        Self::Auth(error)
+    }
 }
 
 impl From<DirectoryStoreError> for ApiError {
@@ -206,6 +258,7 @@ impl From<crate::store::agent_profiles::AgentStoreError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Auth(error) => (error.status(), error.code(), error.message().to_owned()),
             Self::BadPatch => (
                 StatusCode::BAD_REQUEST,
                 "directory_authorization_failed",
