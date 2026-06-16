@@ -10,7 +10,10 @@ use crate::registry::{IntegrationType, ProviderManifest, ProviderStatus};
 
 use crate::product::ApiScope;
 
-use super::{AppState, AuthError, ProductAuth};
+use super::{
+    AppState, AuthError,
+    auth::{AnyAuth, AuthContext},
+};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ProviderListResponse {
@@ -44,10 +47,10 @@ pub struct ErrorBody {
 }
 
 pub async fn list(
-    auth: ProductAuth,
+    auth: AnyAuth,
     State(state): State<AppState>,
 ) -> Result<Json<ProviderListResponse>, ApiError> {
-    auth.require_scope(ApiScope::ProvidersRead)?;
+    require_scope(&auth, ApiScope::ProvidersRead)?;
     let registry = state.load_registry()?;
     let providers = registry
         .providers()
@@ -59,11 +62,11 @@ pub async fn list(
 }
 
 pub async fn get(
-    auth: ProductAuth,
+    auth: AnyAuth,
     State(state): State<AppState>,
     Path(provider_id): Path<String>,
 ) -> Result<Json<SingleProviderResponse>, ApiError> {
-    auth.require_scope(ApiScope::ProvidersRead)?;
+    require_scope(&auth, ApiScope::ProvidersRead)?;
     let registry = state.load_registry()?;
     let provider = registry
         .get(&provider_id)
@@ -74,6 +77,13 @@ pub async fn get(
     Ok(Json(SingleProviderResponse {
         provider: ProviderResponse::from_manifest(provider),
     }))
+}
+
+fn require_scope(auth: &AnyAuth, scope: ApiScope) -> Result<(), AuthError> {
+    match &auth.0 {
+        AuthContext::Bootstrap => Ok(()),
+        AuthContext::Product(_) => auth.require_scope(scope),
+    }
 }
 
 impl ProviderResponse {

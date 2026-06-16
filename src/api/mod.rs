@@ -7,15 +7,19 @@ use axum::{
 
 pub(crate) mod agents;
 pub(crate) mod auth;
+mod console;
 pub(crate) mod directories;
 mod health;
+mod permissions;
 pub(crate) mod products;
 mod providers;
 mod runtimes;
+mod session;
+mod status;
 pub(crate) mod tasks;
 
 pub use agents::{AgentListResponse, AgentResponse, SingleAgentResponse};
-pub use auth::{AuthError, BootstrapAuth, ProductAuth, ProductAuthContext};
+pub use auth::{AnyAuth, AuthError, BootstrapAuth, ProductAuth, ProductAuthContext};
 pub use directories::{DirectoryListResponse, DirectoryResponse, SingleDirectoryResponse};
 pub use health::{HealthResponse, health};
 pub use products::{
@@ -26,6 +30,8 @@ pub use providers::{
     ErrorBody, ErrorResponse, ProviderListResponse, ProviderResponse, SingleProviderResponse,
 };
 pub use runtimes::{RuntimeListResponse, RuntimeResponse};
+pub use session::SessionResponse;
+pub use status::DaemonStatusResponse;
 pub use tasks::{SingleTaskResponse, TaskListResponse, TaskResponse};
 
 use crate::{
@@ -252,6 +258,11 @@ pub fn router() -> Router {
 pub fn router_with_state(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/console", get(console::shell))
+        .route("/console/", get(console::shell))
+        .route("/console/{*path}", get(console::serve))
+        .route("/v1/session", get(session::get))
+        .route("/v1/daemon/status", get(status::get))
         .route("/v1/products", get(products::list).post(products::create))
         .route(
             "/v1/products/{product_id}",
@@ -270,6 +281,7 @@ pub fn router_with_state(state: AppState) -> Router {
         .route("/v1/runtimes", get(runtimes::list))
         .route("/v1/runtimes/detect", post(runtimes::detect))
         .route("/v1/tasks", get(tasks::list).post(tasks::create))
+        .route("/v1/permissions", get(permissions::list))
         .route("/v1/tasks/{task_id}", get(tasks::get))
         .route(
             "/v1/tasks/{task_id}/events",

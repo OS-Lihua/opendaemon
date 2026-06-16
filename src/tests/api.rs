@@ -10,8 +10,9 @@ use serde_json::{Value, json};
 
 use crate::{
     api::{
-        AppState, HealthResponse, ProductAuth, ProductAuthContext, ProviderApiError, health,
-        provider_get, provider_list, router, router_with_state, runtime_detect, runtime_list,
+        AnyAuth, AppState, HealthResponse, ProductAuth, ProductAuthContext, ProviderApiError,
+        health, provider_get, provider_list, router, router_with_state, runtime_detect,
+        runtime_list,
     },
     config::{AuthConfig, RuntimeDetectionConfig, RuntimeEnvironment, StoreConfig},
     product::{ApiScope, ProductStatus},
@@ -46,7 +47,7 @@ fn router_builds_with_health_and_provider_routes() {
 #[tokio::test]
 async fn provider_list_handler_returns_sorted_providers_without_runtime_state() {
     let response = provider_list(
-        product_auth(&[ApiScope::ProvidersRead]),
+        any_product_auth(&[ApiScope::ProvidersRead]),
         State(AppState::default()),
     )
     .await
@@ -71,7 +72,7 @@ async fn provider_list_handler_returns_sorted_providers_without_runtime_state() 
 #[tokio::test]
 async fn provider_get_handler_returns_provider() {
     let response = provider_get(
-        product_auth(&[ApiScope::ProvidersRead]),
+        any_product_auth(&[ApiScope::ProvidersRead]),
         State(AppState::default()),
         AxumPath("codex".to_owned()),
     )
@@ -87,7 +88,7 @@ async fn provider_get_handler_returns_provider() {
 #[tokio::test]
 async fn provider_get_handler_returns_stable_404() {
     let error = provider_get(
-        product_auth(&[ApiScope::ProvidersRead]),
+        any_product_auth(&[ApiScope::ProvidersRead]),
         State(AppState::default()),
         AxumPath("missing-provider".to_owned()),
     )
@@ -126,7 +127,7 @@ async fn runtimes_get_returns_not_detected_without_spawning_commands() {
         )])),
     );
 
-    let response = runtime_list(product_auth(&[ApiScope::RuntimesRead]), State(state))
+    let response = runtime_list(any_product_auth(&[ApiScope::RuntimesRead]), State(state))
         .await
         .unwrap()
         .0;
@@ -168,7 +169,7 @@ async fn runtimes_detect_updates_store_and_reports_missing_provider_unavailable(
     );
 
     let response = runtime_detect(
-        product_auth(&[ApiScope::RuntimesRead]),
+        any_product_auth(&[ApiScope::RuntimesRead]),
         State(state.clone()),
     )
     .await
@@ -195,7 +196,7 @@ async fn runtimes_detect_updates_store_and_reports_missing_provider_unavailable(
     assert!(!body.contains("tasks"));
     assert!(!body.contains("capacity"));
 
-    let latest = runtime_list(product_auth(&[ApiScope::RuntimesRead]), State(state))
+    let latest = runtime_list(any_product_auth(&[ApiScope::RuntimesRead]), State(state))
         .await
         .unwrap()
         .0;
@@ -210,7 +211,7 @@ async fn runtimes_list_exposes_remote_http_runtime_without_detection_side_effect
     let (_temp_registry, providers_dir) = temp_registry_with_provider("test-provider", manifest);
     let state = test_state(providers_dir, RuntimeDetectionConfig::default());
 
-    let response = runtime_list(product_auth(&[ApiScope::RuntimesRead]), State(state))
+    let response = runtime_list(any_product_auth(&[ApiScope::RuntimesRead]), State(state))
         .await
         .unwrap()
         .0;
@@ -248,6 +249,12 @@ fn product_auth(scopes: &[ApiScope]) -> ProductAuth {
         product_id: "product_test".to_owned(),
         scopes: scopes.iter().copied().collect(),
     })
+}
+
+fn any_product_auth(scopes: &[ApiScope]) -> AnyAuth {
+    AnyAuth(crate::api::auth::AuthContext::Product(
+        product_auth(scopes).0,
+    ))
 }
 
 #[tokio::test]
@@ -369,7 +376,7 @@ async fn auth_enforces_health_bootstrap_and_product_tokens() {
         .unwrap();
     assert_eq!(provider_ok.status(), StatusCode::OK);
 
-    let bootstrap_rejected = app
+    let bootstrap_setup_read = app
         .clone()
         .oneshot(
             Request::builder()
@@ -380,12 +387,7 @@ async fn auth_enforces_health_bootstrap_and_product_tokens() {
         )
         .await
         .unwrap();
-    assert_eq!(bootstrap_rejected.status(), StatusCode::UNAUTHORIZED);
-    let bootstrap_body = to_bytes(bootstrap_rejected.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let bootstrap_json: Value = serde_json::from_slice(&bootstrap_body).unwrap();
-    assert_eq!(bootstrap_json["error"]["code"], "product_token_required");
+    assert_eq!(bootstrap_setup_read.status(), StatusCode::OK);
 
     product_store
         .patch_product(

@@ -12,6 +12,14 @@ exclude = [
     "target/**",
 ]
 
+[workspace]
+members = [
+    ".",
+    "crates/opendaemon-console-api",
+    "crates/opendaemon-console-ui",
+]
+resolver = "3"
+
 
 [dependencies]
 anyhow = "1"

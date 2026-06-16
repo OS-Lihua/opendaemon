@@ -100,6 +100,9 @@ pub struct BootstrapAuth;
 #[derive(Clone)]
 pub struct ProductAuth(pub ProductAuthContext);
 
+#[derive(Clone)]
+pub struct AnyAuth(pub AuthContext);
+
 impl ProductAuth {
     pub fn require_scope(&self, scope: ApiScope) -> Result<(), AuthError> {
         if self.0.scopes.contains(&scope) {
@@ -131,6 +134,42 @@ impl ProductAuth {
     }
 }
 
+impl AnyAuth {
+    pub fn require_scope(&self, scope: ApiScope) -> Result<(), AuthError> {
+        match &self.0 {
+            AuthContext::Bootstrap => Ok(()),
+            AuthContext::Product(context) => {
+                if context.scopes.contains(&scope) {
+                    Ok(())
+                } else {
+                    Err(AuthError::InsufficientScope)
+                }
+            }
+        }
+    }
+
+    pub fn require_scopes(&self, scopes: &[ApiScope]) -> Result<(), AuthError> {
+        match &self.0 {
+            AuthContext::Bootstrap => Ok(()),
+            AuthContext::Product(context) => {
+                if scopes.iter().all(|scope| context.scopes.contains(scope)) {
+                    Ok(())
+                } else {
+                    Err(AuthError::InsufficientScope)
+                }
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn product_context(&self) -> Option<&ProductAuthContext> {
+        match &self.0 {
+            AuthContext::Bootstrap => None,
+            AuthContext::Product(context) => Some(context),
+        }
+    }
+}
+
 impl<S> FromRequestParts<S> for BootstrapAuth
 where
     AppState: FromRef<S>,
@@ -158,6 +197,18 @@ where
             AuthContext::Bootstrap => Err(AuthError::ProductTokenRequired),
             AuthContext::Product(context) => Ok(Self(context)),
         }
+    }
+}
+
+impl<S> FromRequestParts<S> for AnyAuth
+where
+    AppState: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = AuthError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        authenticate_request(parts, &AppState::from_ref(state)).map(Self)
     }
 }
 

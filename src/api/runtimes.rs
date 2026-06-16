@@ -8,7 +8,10 @@ use serde::Serialize;
 
 use crate::{product::ApiScope, registry::ProviderManifest, runtime};
 
-use super::{AppState, AuthError, ErrorBody, ErrorResponse, ProductAuth};
+use super::{
+    AppState, AuthError, ErrorBody, ErrorResponse,
+    auth::{AnyAuth, AuthContext},
+};
 
 pub type RuntimeResponse = runtime::model::RuntimeView;
 
@@ -18,10 +21,10 @@ pub struct RuntimeListResponse {
 }
 
 pub async fn list(
-    auth: ProductAuth,
+    auth: AnyAuth,
     State(state): State<AppState>,
 ) -> Result<Json<RuntimeListResponse>, ApiError> {
-    auth.require_scope(ApiScope::RuntimesRead)?;
+    require_scope(&auth, ApiScope::RuntimesRead)?;
     let providers = load_provider_manifests(&state)?;
     let runtimes = state.runtime_store().list_for_providers(&providers).await;
 
@@ -29,10 +32,10 @@ pub async fn list(
 }
 
 pub async fn detect(
-    auth: ProductAuth,
+    auth: AnyAuth,
     State(state): State<AppState>,
 ) -> Result<Json<RuntimeListResponse>, ApiError> {
-    auth.require_scope(ApiScope::RuntimesRead)?;
+    require_scope(&auth, ApiScope::RuntimesRead)?;
     let providers = load_provider_manifests(&state)?;
     let runtimes =
         runtime::detect::detect_providers(&providers, state.runtime_detection_config()).await;
@@ -41,6 +44,13 @@ pub async fn detect(
 
     let runtimes = state.runtime_store().list_for_providers(&providers).await;
     Ok(Json(RuntimeListResponse { runtimes }))
+}
+
+fn require_scope(auth: &AnyAuth, scope: ApiScope) -> Result<(), AuthError> {
+    match &auth.0 {
+        AuthContext::Bootstrap => Ok(()),
+        AuthContext::Product(_) => auth.require_scope(scope),
+    }
 }
 
 fn load_provider_manifests(state: &AppState) -> Result<Vec<ProviderManifest>, ApiError> {

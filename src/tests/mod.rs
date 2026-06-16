@@ -1,6 +1,7 @@
 mod agents;
 mod api;
 mod cli;
+mod console;
 mod control_plane;
 mod directories;
 mod registry;

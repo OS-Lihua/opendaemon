@@ -1,0 +1,12 @@
+[build]
+target = "index.html"
+dist = "dist"
+public_url = "/console/"
+
+[watch]
+watch = [
+    "../crates/opendaemon-console-api/src",
+    "../crates/opendaemon-console-ui/src",
+    "index.html",
+    "static",
+]

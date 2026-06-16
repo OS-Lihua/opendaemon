@@ -1081,26 +1081,40 @@ Acceptance criteria:
 - stale runtimes become offline
 - remote tasks still obey local directory grants
 
-### Phase 11: Desktop UX
+### Phase 11: Web and Desktop Console UX
 
-Goal: make grants, profiles, runtime status, and task history understandable to
-end users after the daemon core is complete.
+Detailed plan: `docs/tasks/phase-11-web-and-desktop-console.md`.
+
+Goal: make grants, profiles, runtime status, task history, and permission
+responses understandable to end users through one shared Console experience that
+can run as a local web page and, optionally, a desktop shell.
 
 Tasks:
 
-- add optional Tauri desktop app
-- directory picker
-- agent profile editor
-- provider install and detection view
-- task history
-- optional provider permission response surfaces
-- logs viewer
+- add shared web Console app
+- optionally wrap the same Console in a Tauri desktop shell
+- keep web and desktop routes, copy, API client, and visual system consistent
+- add bootstrap-token and product-token startup flows
+- add daemon, scheduler, control-plane, runtime, task, and permission status
+  views
+- add product/token setup surfaces for bootstrap users
+- add Agent Profile editor
+- add Directory Grant editor with web manual path entry and desktop directory
+  picker
+- add provider registry and runtime detection views
+- add task creation, task history, event transcript, result, diff, and
+  remote-upload audit views
+- add provider permission request inbox and response surfaces
 
 Acceptance criteria:
 
 - users can grant a directory without editing JSON
 - users can see what product requested a task
-- products or UI clients can respond to provider permission events when needed
+- users can inspect task state, result, transcript, changed files, and diffs
+- users can respond to provider permission events when needed
+- web and desktop Console surfaces stay consistent
+- daemon core policy, product auth, control-plane, and remote-execution rules
+  remain unchanged
 
 ## Testing Strategy
 
