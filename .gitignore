@@ -43,6 +43,7 @@ lerna-debug.log*
 .env.development
 .env.test
 .env.production
+!.env.example
 
 # temp directory
 .temp
@@ -77,6 +78,7 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+!.env.example
 
 # vercel
 .vercel

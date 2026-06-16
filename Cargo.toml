@@ -24,7 +24,8 @@ resolver = "3"
 [dependencies]
 anyhow = "1"
 axum = "0.8"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
+dotenvy = "0.15"
 jsonschema = "0.33"
 schemars = { version = "1", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

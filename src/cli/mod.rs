@@ -25,9 +25,9 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct DaemonArgs {
-    #[arg(long, default_value_t = DEFAULT_DAEMON_HOST)]
+    #[arg(long, env = "OPENDAEMON_DAEMON_HOST", default_value_t = DEFAULT_DAEMON_HOST)]
     host: IpAddr,
-    #[arg(long, default_value_t = DEFAULT_DAEMON_PORT)]
+    #[arg(long, env = "OPENDAEMON_DAEMON_PORT", default_value_t = DEFAULT_DAEMON_PORT)]
     port: u16,
 }
 

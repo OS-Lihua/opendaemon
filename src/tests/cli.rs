@@ -52,6 +52,41 @@ fn cli_parser_accepts_host_and_port_overrides() {
     );
 }
 
+#[tokio::test]
+async fn cli_parser_accepts_daemon_bind_address_from_env() {
+    let _guard = crate::tests::process_env_test_guard().await;
+    let previous_host = std::env::var_os("OPENDAEMON_DAEMON_HOST");
+    let previous_port = std::env::var_os("OPENDAEMON_DAEMON_PORT");
+    unsafe {
+        std::env::set_var("OPENDAEMON_DAEMON_HOST", "127.0.0.3");
+        std::env::set_var("OPENDAEMON_DAEMON_PORT", "49153");
+    }
+
+    let cli = Cli::parse_from_for_test(["opendaemon", "daemon"]).unwrap();
+    let config = cli.command_for_test().daemon_args_for_test().config();
+    assert_eq!(
+        config,
+        DaemonConfig::new(IpAddr::from([127, 0, 0, 3]), 49153)
+    );
+
+    match previous_host {
+        Some(value) => unsafe {
+            std::env::set_var("OPENDAEMON_DAEMON_HOST", value);
+        },
+        None => unsafe {
+            std::env::remove_var("OPENDAEMON_DAEMON_HOST");
+        },
+    }
+    match previous_port {
+        Some(value) => unsafe {
+            std::env::set_var("OPENDAEMON_DAEMON_PORT", value);
+        },
+        None => unsafe {
+            std::env::remove_var("OPENDAEMON_DAEMON_PORT");
+        },
+    }
+}
+
 #[test]
 fn cli_parser_accepts_ephemeral_port() {
     let cli = Cli::parse_from_for_test(["opendaemon", "daemon", "--port", "0"]).unwrap();

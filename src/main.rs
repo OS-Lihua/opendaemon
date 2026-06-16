@@ -4,6 +4,7 @@ use opendaemon::cli;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let _ = dotenvy::dotenv();
     init_logging();
 
     match cli::run().await {
