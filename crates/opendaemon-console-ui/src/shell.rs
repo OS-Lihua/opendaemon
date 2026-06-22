@@ -1,7 +1,18 @@
 use leptos::prelude::*;
 
+use crate::state::app::use_app_state;
+
 #[component]
 pub fn Shell(active_route: &'static str, children: Children) -> impl IntoView {
+    let state = use_app_state();
+    let refresh = {
+        let state = state.clone();
+        move |_| state.refresh()
+    };
+    let sign_out = {
+        let state = state.clone();
+        move |_| state.sign_out()
+    };
     view! {
         <div class="app-shell">
             <aside class="sidebar" aria-label="Console navigation">
@@ -22,8 +33,21 @@ pub fn Shell(active_route: &'static str, children: Children) -> impl IntoView {
             </aside>
             <section class="shell-content">
                 <header class="top-bar">
-                    <span>"Local daemon"</span>
-                    <strong>"Rust Console"</strong>
+                    <span>
+                        {move || state.auth.with(|auth| {
+                            auth.as_ref()
+                                .map(|auth| format!(
+                                    "{} {}",
+                                    auth.stored.credential_mode,
+                                    auth.session.product_id.clone().unwrap_or_else(|| "bootstrap".to_owned())
+                                ))
+                                .unwrap_or_else(|| "Disconnected".to_owned())
+                        })}
+                    </span>
+                    <div class="top-actions">
+                        <button type="button" on:click=refresh>"Refresh"</button>
+                        <button type="button" on:click=sign_out>"Sign out"</button>
+                    </div>
                 </header>
                 {children()}
             </section>

@@ -8,14 +8,14 @@ default:
 # install all needed tools (Unix: bash, macOS, Linux)
 [unix]
 init:
-    ./scripts/justfile/init.sh --component rust-analyzer clippy rustfmt
+    ./scripts/justfile/init.sh --component rust-analyzer clippy rustfmt trunk wasm-bindgen wasm32-unknown-unknown
     ./scripts/justfile/init.sh --install prek cargo-nextest
     @echo "[0] init successfully"
 
 # install all needed tools (Windows: PowerShell)
 [windows]
 init:
-    pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./scripts/justfile/init.ps1 --component rust-analyzer clippy rustfmt
+    pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./scripts/justfile/init.ps1 --component rust-analyzer clippy rustfmt trunk wasm-bindgen wasm32-unknown-unknown
     pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./scripts/justfile/init.ps1 --install prek cargo-nextest
     @echo "[0] init successfully"
 

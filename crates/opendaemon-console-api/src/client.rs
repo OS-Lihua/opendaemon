@@ -5,9 +5,10 @@ use crate::{
         AgentEnvelope, AgentProfile, AgentProfileFormPayload, AgentsEnvelope, CreateProductPayload,
         CreateProductTokenPayload, CreatedProductToken, CreatedProductTokenEnvelope, DaemonStatus,
         DirectoriesEnvelope, DirectoryEnvelope, DirectoryGrant, DirectoryGrantFormPayload,
-        PermissionsEnvelope, Product, ProductEnvelope, ProductTokensEnvelope, ProductsEnvelope,
-        Provider, ProvidersEnvelope, RuntimeView, RuntimesEnvelope, Session, Task,
-        TaskCreatePayload, TaskEnvelope, TasksEnvelope, UpdateProductPayload,
+        PermissionDecision, PermissionResponsePayload, PermissionsEnvelope, Product,
+        ProductEnvelope, ProductTokensEnvelope, ProductsEnvelope, Provider, ProvidersEnvelope,
+        RuntimeView, RuntimesEnvelope, Session, Task, TaskCreatePayload, TaskEnvelope,
+        TasksEnvelope, UpdateProductPayload,
     },
     error::ConsoleApiError,
 };
@@ -94,6 +95,18 @@ impl ConsoleApiClient {
         Ok(())
     }
 
+    fn id_path_segment(id: &str) -> String {
+        let mut encoded = String::new();
+        for byte in id.bytes() {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+                encoded.push(byte as char);
+            } else {
+                encoded.push_str(&format!("%{byte:02X}"));
+            }
+        }
+        encoded
+    }
+
     pub async fn session(&self) -> Result<Session, ConsoleApiError> {
         self.get_json("/v1/session").await
     }
@@ -122,18 +135,24 @@ impl ConsoleApiClient {
         product_id: &str,
         input: &UpdateProductPayload,
     ) -> Result<Product, ConsoleApiError> {
-        self.patch_json::<_, ProductEnvelope>(&format!("/v1/products/{product_id}"), input)
-            .await
-            .map(|response| response.product)
+        self.patch_json::<_, ProductEnvelope>(
+            &format!("/v1/products/{}", Self::id_path_segment(product_id)),
+            input,
+        )
+        .await
+        .map(|response| response.product)
     }
 
     pub async fn product_tokens(
         &self,
         product_id: &str,
     ) -> Result<Vec<crate::dto::ProductToken>, ConsoleApiError> {
-        self.get_json::<ProductTokensEnvelope>(&format!("/v1/products/{product_id}/tokens"))
-            .await
-            .map(|response| response.tokens)
+        self.get_json::<ProductTokensEnvelope>(&format!(
+            "/v1/products/{}/tokens",
+            Self::id_path_segment(product_id)
+        ))
+        .await
+        .map(|response| response.tokens)
     }
 
     pub async fn create_product_token(
@@ -142,7 +161,7 @@ impl ConsoleApiClient {
         input: &CreateProductTokenPayload,
     ) -> Result<CreatedProductToken, ConsoleApiError> {
         self.post_json::<_, CreatedProductTokenEnvelope>(
-            &format!("/v1/products/{product_id}/tokens"),
+            &format!("/v1/products/{}/tokens", Self::id_path_segment(product_id)),
             input,
         )
         .await
@@ -154,8 +173,12 @@ impl ConsoleApiClient {
         product_id: &str,
         token_id: &str,
     ) -> Result<(), ConsoleApiError> {
-        self.delete(&format!("/v1/products/{product_id}/tokens/{token_id}"))
-            .await
+        self.delete(&format!(
+            "/v1/products/{}/tokens/{}",
+            Self::id_path_segment(product_id),
+            Self::id_path_segment(token_id)
+        ))
+        .await
     }
 
     pub async fn providers(&self) -> Result<Vec<Provider>, ConsoleApiError> {
@@ -191,6 +214,11 @@ impl ConsoleApiClient {
             .map(|response| response.agent)
     }
 
+    pub async fn delete_agent(&self, agent_id: &str) -> Result<(), ConsoleApiError> {
+        self.delete(&format!("/v1/agents/{}", Self::id_path_segment(agent_id)))
+            .await
+    }
+
     pub async fn directories(&self) -> Result<Vec<DirectoryGrant>, ConsoleApiError> {
         self.get_json::<DirectoriesEnvelope>("/v1/directories")
             .await
@@ -206,10 +234,24 @@ impl ConsoleApiClient {
             .map(|response| response.directory)
     }
 
+    pub async fn delete_directory(&self, directory_id: &str) -> Result<(), ConsoleApiError> {
+        self.delete(&format!(
+            "/v1/directories/{}",
+            Self::id_path_segment(directory_id)
+        ))
+        .await
+    }
+
     pub async fn tasks(&self) -> Result<Vec<Task>, ConsoleApiError> {
         self.get_json::<TasksEnvelope>("/v1/tasks")
             .await
             .map(|response| response.tasks)
+    }
+
+    pub async fn task(&self, task_id: &str) -> Result<Task, ConsoleApiError> {
+        self.get_json::<TaskEnvelope>(&format!("/v1/tasks/{}", Self::id_path_segment(task_id)))
+            .await
+            .map(|response| response.task)
     }
 
     pub async fn create_task(&self, input: &TaskCreatePayload) -> Result<Task, ConsoleApiError> {
@@ -218,10 +260,40 @@ impl ConsoleApiClient {
             .map(|response| response.task)
     }
 
+    pub async fn cancel_task(&self, task_id: &str) -> Result<Task, ConsoleApiError> {
+        self.post_json::<_, TaskEnvelope>(
+            &format!("/v1/tasks/{}/cancel", Self::id_path_segment(task_id)),
+            &(),
+        )
+        .await
+        .map(|response| response.task)
+    }
+
     pub async fn permissions(&self) -> Result<Vec<crate::dto::PermissionRequest>, ConsoleApiError> {
         self.get_json::<PermissionsEnvelope>("/v1/permissions?status=pending")
             .await
             .map(|response| response.permissions)
+    }
+
+    pub async fn respond_to_permission(
+        &self,
+        task_id: &str,
+        request_id: &str,
+        decision: PermissionDecision,
+        reason: Option<String>,
+    ) -> Result<Task, ConsoleApiError> {
+        let payload = PermissionResponsePayload {
+            event_type: "provider.permission_response".to_owned(),
+            request_id: request_id.to_owned(),
+            decision,
+            reason,
+        };
+        self.post_json::<_, serde_json::Value>(
+            &format!("/v1/tasks/{}/events", Self::id_path_segment(task_id)),
+            &payload,
+        )
+        .await?;
+        self.task(task_id).await
     }
 }
 

@@ -22,8 +22,8 @@ const CONSOLE_HTML: &str = r#"<!doctype html>
 </html>
 "#;
 
-pub async fn shell() -> Html<&'static str> {
-    Html(CONSOLE_HTML)
+pub async fn shell() -> Response {
+    console_index_response()
 }
 
 pub async fn serve(Path(path): Path<String>) -> Response {
@@ -46,7 +46,11 @@ pub async fn serve(Path(path): Path<String>) -> Response {
         };
     }
 
-    match std::fs::read_to_string(dist.join("index.html")) {
+    console_index_response()
+}
+
+fn console_index_response() -> Response {
+    match std::fs::read_to_string(console_dist_dir().join("index.html")) {
         Ok(index) => Html(index).into_response(),
         Err(_) => Html(CONSOLE_HTML).into_response(),
     }

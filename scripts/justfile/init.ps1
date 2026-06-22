@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 function Usage {
     @"
 usage:
-  init.ps1 --component <components...>
+  init.ps1 --component <tools...>
   init.ps1 --install <crates...>
 
 examples:
@@ -20,24 +20,81 @@ function Ensure-Command {
     }
 }
 
-function Ensure-RustupComponents {
-    param([Parameter(Mandatory)][string[]]$Components)
+function Get-ToolCommandCandidates {
+    param([Parameter(Mandatory)][string]$Tool)
 
-    $installed = & rustup component list --installed 2>$null
-    $missing = @()
+    switch ($Tool) {
+        "clippy" { return @("cargo-clippy", "clippy-driver") }
+        "rustfmt" { return @("rustfmt") }
+        "rust-analyzer" { return @("rust-analyzer") }
+        "wasm32-unknown-unknown" { return @() }
+        default { return @($Tool) }
+    }
+}
 
-    foreach ($component in $Components) {
-        if (-not ($installed | Select-String -Pattern ("^" + [regex]::Escape($component) + "-") -Quiet)) {
-            $missing += $component
+function Get-BrewFormulaForTool {
+    param([Parameter(Mandatory)][string]$Tool)
+
+    switch ($Tool) {
+        "clippy" { return "clippy" }
+        "rust-analyzer" { return "rust-analyzer" }
+        "rustfmt" { return "rust" }
+        "trunk" { return "trunk" }
+        "wasm-bindgen" { return "wasm-bindgen" }
+        default { return $Tool }
+    }
+}
+
+function Test-AnyCommand {
+    param([Parameter(Mandatory)][string[]]$Names)
+
+    foreach ($name in $Names) {
+        if (Get-Command $name -ErrorAction SilentlyContinue) {
+            return $true
         }
     }
+    return $false
+}
 
-    if ($missing.Count -gt 0) {
-        & rustup component add @missing
-        if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-        }
+function Test-RustTarget {
+    param([Parameter(Mandatory)][string]$Target)
+
+    try {
+        $targets = & rustc --print target-list 2>$null
     }
+    catch {
+        return $false
+    }
+    return ($targets -contains $Target)
+}
+
+function Ensure-Tool {
+    param([Parameter(Mandatory)][string]$Tool)
+
+    if ($Tool -eq "wasm32-unknown-unknown") {
+        if (Test-RustTarget -Target $Tool) {
+            return
+        }
+        [Console]::Error.WriteLine("error: missing Rust target: $Tool")
+        [Console]::Error.WriteLine("install it with: rustup target add $Tool")
+        [Console]::Error.WriteLine("note: Homebrew Rust does not manage additional Rust std targets reliably; rustup is the supported fallback for this target.")
+        exit 1
+    }
+
+    $candidates = Get-ToolCommandCandidates -Tool $Tool
+    if (Test-AnyCommand -Names $candidates) {
+        return
+    }
+
+    [Console]::Error.WriteLine("error: missing required tool: $Tool")
+    if (Get-Command brew -ErrorAction SilentlyContinue) {
+        $formula = Get-BrewFormulaForTool -Tool $Tool
+        [Console]::Error.WriteLine("install it with: brew install $formula")
+    }
+    elseif (Get-Command rustup -ErrorAction SilentlyContinue) {
+        [Console]::Error.WriteLine("install it with: rustup component add $Tool")
+    }
+    exit 1
 }
 
 function Ensure-CargoTool {
@@ -79,17 +136,18 @@ while ($i -lt $args.Count) {
             exit 0
         }
         "--component" {
-            Ensure-Command rustup
             $i++
-            $components = @()
+            $tools = @()
             while ($i -lt $args.Count -and -not $args[$i].StartsWith("--")) {
-                $components += $args[$i]
+                $tools += $args[$i]
                 $i++
             }
-            if ($components.Count -eq 0) {
+            if ($tools.Count -eq 0) {
                 throw "--component requires at least 1 value"
             }
-            Ensure-RustupComponents -Components $components
+            foreach ($tool in $tools) {
+                Ensure-Tool -Tool $tool
+            }
         }
         "--install" {
             Ensure-Command cargo

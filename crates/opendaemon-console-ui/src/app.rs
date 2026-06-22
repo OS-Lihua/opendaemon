@@ -1,16 +1,33 @@
 use leptos::prelude::*;
 
-use crate::{routes, shell::Shell};
+use crate::{routes, shell::Shell, state::app::AppState};
 
 #[component]
 pub fn App() -> impl IntoView {
+    let state = AppState::new();
+    provide_context(state.clone());
+    state.bootstrap_from_storage();
     let route = route_from_location();
     view! {
-        <Shell active_route=route>
-            <main class="workspace">
-                {route_view(route)}
-            </main>
-        </Shell>
+        {move || {
+            if state.auth.with(Option::is_some) {
+                view! {
+                    <Shell active_route=route>
+                        <main class="workspace">
+                            <StatusBanner />
+                            {route_view(route)}
+                        </main>
+                    </Shell>
+                }.into_any()
+            } else {
+                view! {
+                    <main class="login-workspace">
+                        <StatusBanner />
+                        {routes::login::LoginRoute()}
+                    </main>
+                }.into_any()
+            }
+        }}
     }
 }
 
@@ -45,5 +62,17 @@ fn route_view(route: &'static str) -> impl IntoView {
         "permissions" => routes::permissions::RouteView().into_any(),
         "settings" => routes::settings::RouteView().into_any(),
         _ => routes::overview::RouteView().into_any(),
+    }
+}
+
+#[component]
+fn StatusBanner() -> impl IntoView {
+    let state = crate::state::app::use_app_state();
+    view! {
+        <div class="status-banner">
+            {move || state.loading.get().then_some(view! { <span>"Loading..."</span> })}
+            {move || state.notice.get().map(|notice| view! { <strong>{notice}</strong> })}
+            {move || state.error.get().map(|error| view! { <strong class="error-text">{error}</strong> })}
+        </div>
     }
 }
